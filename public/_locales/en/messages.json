@@ -1,0 +1,5 @@
+{
+  "extensionName": { "message": "StorageBar — Website Storage Manager" },
+  "extensionDescription": { "message": "Inspect and manage site storage in a side panel or a dedicated workspace tab." },
+  "actionTitle": { "message": "Open StorageBar" }
+}

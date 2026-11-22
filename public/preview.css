@@ -1,0 +1,7 @@
+body { margin: 0; font: 14px system-ui, "Microsoft YaHei UI", sans-serif; background: Canvas; color: CanvasText; }
+main { display: grid; gap: 12px; padding: 16px; }
+h1 { margin: 0; font-size: 1.2rem; overflow-wrap: anywhere; }
+video, audio { width: 100%; }
+video, img { max-height: calc(100dvh - 72px); }
+img { max-width: 100%; object-fit: contain; justify-self: center; }
+pre { margin: 0; font-family: var(--mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }

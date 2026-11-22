@@ -1,0 +1,5 @@
+{
+  "extensionName": { "message": "StorageBar — 网页存储管理" },
+  "extensionDescription": { "message": "在侧栏或独立标签页检查和管理网页存储。" },
+  "actionTitle": { "message": "打开 StorageBar" }
+}
