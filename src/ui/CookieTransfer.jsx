@@ -18,7 +18,7 @@ const columns = (t) => [
   {
     title: "Cookie", dataIndex: "name", rowScope: "row",
     render: (name, row) => <div className="cell-lines dialog-wrap">
-      <span>{row.index == null ? name : t("第 {index} 条", { index: row.index })}</span>
+      <span className="data-input">{row.index == null ? name : t("第 {index} 条", { index: row.index })}</span>
       {row.detail && <Typography.Text type="secondary">{t(row.detail)}</Typography.Text>}
     </div>,
   },
@@ -104,7 +104,9 @@ export default function CookieTransfer({ mode, target, stale, verify, onClose, o
     status: row.status ?? (row.error ? "invalid" : row.previous ? "conflict" : "new"),
     detail: row.detail ?? row.error,
   }));
-  return <WideModal title={importing ? t("导入 Cookie 备份") : t("导出 Cookie")} onCancel={onClose}
+  const canBackdropClose = !working && (!importing || (!text.trim() && !rows && !results));
+  return <WideModal size={importing ? "lg" : "md"} title={importing ? t("导入 Cookie 备份") : t("导出 Cookie")}
+    subtitle={target.origin} maskClosable={canBackdropClose} onCancel={onClose}
     keyboard={!working} closable={!working} footer={[
       <Button key="close" onClick={onClose} disabled={working}>{results ? t("关闭") : t("取消")}</Button>,
       !importing && <Button key="copy" disabled={working || stale || !exportRows.length} onClick={() => void perform(async () => {
@@ -117,13 +119,13 @@ export default function CookieTransfer({ mode, target, stale, verify, onClose, o
       </Button>,
     ]}>
     <div className="dialog-stack">
-      <Typography.Text code>{target.origin}</Typography.Text>
       {stale && <Alert type="warning" title={t("目标已变化，请重新打开此操作。")} showIcon />}
       {error && <Alert type="error" title={t(error)} showIcon />}
       {importing ? <>
         {!results && <>
           <Input.TextArea rows={4} className="data-input" aria-label={t("粘贴 Cookie JSON")} placeholder={t("粘贴 Cookie JSON")}
-            value={text} readOnly={working || stale} onChange={(event) => { setText(event.target.value); setRows(null); }} />
+            value={text} readOnly={working || stale} spellCheck={false}
+            onChange={(event) => { setText(event.target.value); setRows(null); }} />
           <div className="detail-actions">
             <Upload accept=".json,application/json" disabled={working || stale} showUploadList={false} beforeUpload={choose}>
               <Button disabled={working || stale}>{t("选择备份 JSON")}</Button>
@@ -135,23 +137,37 @@ export default function CookieTransfer({ mode, target, stale, verify, onClose, o
           <Alert type={report.failed ? "warning" : "success"} showIcon
             title={t("导入结果：成功 {success} · 跳过 {skipped} · 失败 {failed}", report)} />
         </> : rows ? <>
-          <Typography.Text>{t("新增 {fresh} 项 · 冲突 {conflicts} 项 · 无效 {invalid} 项", { fresh, conflicts, invalid })}</Typography.Text>
+          <div className="summary-strip">
+            <Tag color="success">{t("新增")} {fresh}</Tag>
+            <Tag color={conflicts ? "warning" : "default"}>{t("冲突")} {conflicts}</Tag>
+            <Tag color={invalid ? "error" : "default"}>{t("无效")} {invalid}</Tag>
+          </div>
           {conflicts > 0 && <Segmented block aria-label={t("Cookie 冲突处理")} value={policy} onChange={setPolicy} disabled={working || stale}
             options={[{ value: "skip", label: t("跳过冲突") }, { value: "overwrite", label: t("覆盖冲突") }]} />}
         </> : <Typography.Text type="secondary">{t("支持 StorageBar 备份和 Cookie-Editor JSON，确认前不会写入。")}</Typography.Text>}
-        {(rows || results) && <Table key={results ? "results" : "preview"} className="compact-table" size="small"
-          tableLayout="fixed" columns={columns(t)} rowKey="id" pagination={pagination} dataSource={tableRows} />}
+        {(rows || results) && <div className="metadata-card">
+          <Table key={results ? "results" : "preview"} className="compact-table" size="small"
+            tableLayout="fixed" columns={columns(t)} rowKey="id" pagination={pagination} dataSource={tableRows} />
+        </div>}
       </> : <>
-        {selectedKeys.length > 0 && <Segmented value={scope} onChange={setScope}
-          options={[{ value: "all", label: t("本站全部") }, { value: "selected", label: t("仅选中项") }]} />}
-        <Segmented value={compatible ? "compatible" : "backup"} onChange={(value) => setCompatible(value === "compatible")}
-          options={[{ value: "compatible", label: t("兼容 JSON") }, { value: "backup", label: t("StorageBar 备份") }]} />
+        {selectedKeys.length > 0 && <div className="form-field">
+          <span>{t("导出范围")}</span>
+          <Segmented block value={scope} onChange={setScope}
+            options={[{ value: "all", label: t("本站全部") }, { value: "selected", label: t("仅选中项") }]} />
+        </div>}
+        <div className="form-field">
+          <span>{t("导出格式")}</span>
+          <Segmented block value={compatible ? "compatible" : "backup"} onChange={(value) => setCompatible(value === "compatible")}
+            options={[{ value: "compatible", label: t("兼容 JSON") }, { value: "backup", label: t("StorageBar 备份") }]} />
+        </div>
         <Alert type="warning" showIcon title={t("备份包含 Cookie 原值，包括可读取的 HttpOnly Cookie。")}
           description={t("JSON 将保存到本机。请只在你信任的地方保存和使用。")} />
-        {backup.status === "loading" && !stale && <Spin size="small" />}
-        {backup.status === "error" && <Alert type="error" title={t(backup.error)}
-          action={<Button onClick={() => setRetry((value) => value + 1)}>{t("重试")}</Button>} />}
-        {exportRows.length > 0 && <Typography.Text>{t("将导出当前站点的 {count} 项未分区 Cookie。", { count: exportRows.length })}</Typography.Text>}
+        {backup.status === "loading" && !stale && <div className="modal-stat-card"><Spin size="small" /></div>}
+        {backup.status === "error" && <Alert type="error" showIcon title={t(backup.error)}
+          action={<Button size="small" onClick={() => setRetry((value) => value + 1)}>{t("重试")}</Button>} />}
+        {exportRows.length > 0 && <div className="modal-stat-card">
+          <Typography.Text>{t("将导出当前站点的 {count} 项未分区 Cookie。", { count: exportRows.length })}</Typography.Text>
+        </div>}
         {backup.status === "ready" && !exportRows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有可导出的 Cookie")} />}
       </>}
     </div>

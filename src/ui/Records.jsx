@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CopyOutlined, DatabaseOutlined, DeleteOutlined, DiffOutlined, DownloadOutlined, EditOutlined, ExportOutlined,
   FilterOutlined, LeftOutlined, MoreOutlined, PlusOutlined, PushpinOutlined, RightOutlined, SearchOutlined, UndoOutlined, UploadOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Checkbox, Input, Segmented, Select, Spin, Table, Typography } from "antd";
+import { Alert, Button, Checkbox, Input, Segmented, Select, Spin, Table, Tag, Tooltip, Typography } from "antd";
 import { deleteCookies, getSiteCookies } from "../api/cookies.js";
 import { runInPage } from "../api/page.js";
 import JsonViewer from "./JsonViewer.jsx";
 import IconAction from "./IconAction.jsx";
 import IdbQuery from "./IdbQuery.jsx";
-import { jsonError } from "./jsonDocument.js";
+import { formatJson, jsonError, jsonTree, jsonTreeLimit } from "./jsonDocument.js";
 import { usePreferences } from "./preferences.js";
 import { MediaPreview } from "./MediaBrowser.jsx";
 import { openPreviewWindow } from "./openPreviewWindow.js";
@@ -21,6 +21,15 @@ import ActionMenu, { menuShortcut, useActionMenu } from "./ActionMenu.jsx";
 
 const nameLabel = (name, t) => name === "" ? t("（空名称）") : name;
 export const storageLabel = (kind) => kind === "local" ? "LocalStorage" : "SessionStorage";
+
+function httpStatusColor(status) {
+  if (typeof status !== "number") return "default";
+  if (status >= 200 && status < 300) return "success";
+  if (status >= 300 && status < 400) return "processing";
+  if (status >= 400 && status < 500) return "warning";
+  if (status >= 500) return "error";
+  return "default";
+}
 
 export function StateMessage({ title, children, action, busy = false }) {
   const { t } = usePreferences();
@@ -44,11 +53,13 @@ function Selector({ label, value, names, onChange }) {
 
 function Metadata({ rows }) {
   const { t } = usePreferences();
-  return <Table className="compact-table" size="small" tableLayout="fixed" showHeader={false} pagination={false}
-    rowKey="label" dataSource={rows.map(([label, value]) => ({ label, value }))} columns={[
-      { dataIndex: "label", width: "38%", rowScope: "row", render: (label) => <Typography.Text type="secondary">{label}</Typography.Text> },
-      { dataIndex: "value", render: (value) => <span className="dialog-wrap">{value ?? t("未知")}</span> },
-    ]} />;
+  return <div className="metadata-card">
+    <Table className="compact-table metadata-table" size="small" tableLayout="fixed" showHeader={false} pagination={false}
+      rowKey="label" dataSource={rows.map(([label, value]) => ({ label, value }))} columns={[
+        { dataIndex: "label", width: "36%", rowScope: "row", render: (label) => <Typography.Text type="secondary">{label}</Typography.Text> },
+        { dataIndex: "value", render: (value) => <span className="dialog-wrap">{value ?? t("未知")}</span> },
+      ]} />
+  </div>;
 }
 
 function RecordDetail({ target, scope, row, currentRow, listStatus, revision, onClose, onEdit, onDelete, copy, working, editor,
@@ -58,6 +69,7 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
   const [previewError, setPreviewError] = useState("");
   const closePreview = useRef(null);
   const inspectorHeader = useRef(null);
+  const detailContent = useRef(null);
   useEffect(() => () => closePreview.current?.(), []);
   useLayoutEffect(() => { if (pinned) inspectorHeader.current?.focus(); }, [pinned]);
   const { section, dbName, storeName, cacheName } = scope;
@@ -69,7 +81,18 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
   const detail = useRead(needsRead ? JSON.stringify([row.id, retry, revision]) : null, load);
   const cookie = currentRow?.cookie;
   const text = section === "storage" ? currentRow?.value : section === "cookies" ? cookie?.value : detail.value?.text;
-  const viewJson = typeof text === "string" && (section === "storage" || section === "idb") && !jsonError(text);
+  const viewJson = useMemo(() => typeof text === "string" && (section === "storage" || section === "idb")
+    && !jsonError(text), [section, text]);
+  const copyValue = useMemo(() => {
+    if (!viewJson || !jsonTree(text)) return text;
+    const formatted = formatJson(text);
+    return formatted.length <= jsonTreeLimit ? formatted : text;
+  }, [viewJson, text]);
+  const editing = !!editor;
+  useLayoutEffect(() => {
+    const scrollers = detailContent.current?.querySelectorAll(".value-block-framed, .record-editor-scroll, .record-detail-content[data-media]");
+    scrollers?.forEach((node) => { node.scrollTop = 0; });
+  }, [editing, row.id]);
   const allowEdit = (!!currentRow && !listStatus.refreshing) || detail.value?.editable === true;
   const detailReady = needsRead ? detail.status === "ready" : !!currentRow;
   const state = needsRead ? detail : listStatus;
@@ -84,57 +107,79 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
       setPreviewError(error.message);
     }
   };
-  const title = editor?.title ?? nameLabel(row.title, t);
+  const name = nameLabel(row.title, t);
+  const title = editor?.title ?? <Tooltip title={t("点击复制")} placement="bottomLeft" trigger={["hover", "focus"]}>
+    <Button type="text" size="small" className="record-title-copy"
+      aria-label={t("复制标题 {name}", { name })} onClick={() => copy(row.title)}>
+      <span className="cell-text">{name}</span>
+      <CopyOutlined className="record-title-copy-icon" aria-hidden="true" />
+    </Button>
+  </Tooltip>;
   const close = editor?.onCancel ?? onClose;
-  const footer = editor?.footer ?? [
-    <Button key="close" onClick={onClose} disabled={working}>{t("关闭")}</Button>,
-    allowEdit && <Button key="edit" type="primary" icon={<EditOutlined />} disabled={working}
-      onClick={() => onEdit({ row: currentRow ?? row, detail: detail.value })}>{t("编辑")}</Button>,
-  ];
-  const body = editor ? editor.body : <div className="dialog-stack">
-      <div className="record-detail-toolbar">
-        <Typography.Text type="secondary" className="dialog-wrap">{target.origin} · {scope.section === "storage"
-          ? storageLabel(scope.kind) : scope.section === "idb" ? `${scope.dbName} / ${scope.storeName}`
-            : scope.section === "cache" ? scope.cacheName : "Cookies"}</Typography.Text>
-        <div className="action-strip" role="group" aria-label={t("记录操作")}>
-          <div className="action-group">
-            {!viewJson && text !== undefined && !state.refreshing && <IconAction icon={<CopyOutlined />}
-              label={t(section === "idb" && !detail.value?.editable ? "复制预览" : "复制值")} onClick={() => copy(text)} />}
-            {section === "cache" && <IconAction icon={<CopyOutlined />} label={t("复制 URL")} onClick={() => copy(row.title)} />}
-            {detailReady && !state.refreshing && <IconAction icon={<ExportOutlined />}
-              label={t("独立窗口查看")} onClick={openPreview} />}
-            {canPin && <IconAction icon={<PushpinOutlined />} label={t(pinned ? "取消固定详情" : "固定详情")}
-              aria-pressed={pinned} onClick={onPin} />}
-          </div>
-          <div className="action-group">
-            <IconAction danger icon={<DeleteOutlined />} label={t("删除")} aria-haspopup="dialog"
-              disabled={working || (needsRead ? detail.status === "loading" : !currentRow || listStatus.refreshing)}
-              onClick={() => onDelete([currentRow ?? row])} />
-          </div>
+  const canPreview = detailReady && !state.refreshing;
+  const cannotDelete = working || (needsRead ? detail.status === "loading" : !currentRow || listStatus.refreshing);
+  const remove = () => onDelete([currentRow ?? row]);
+  const footer = editor ? <div className="detail-actions record-edit-actions">{editor.footer}</div>
+    : <div className="record-detail-footer">
+      <div className="action-strip record-detail-tools" role="group" aria-label={t("记录操作")}>
+        <div className="action-group">
+          {text !== undefined && !state.refreshing && <IconAction icon={<CopyOutlined />}
+            label={t(viewJson ? "复制格式化 JSON" : section === "idb" && !detail.value?.editable ? "复制预览" : "复制值")}
+            onClick={() => copy(copyValue)} />}
+          {section === "cache" && <IconAction icon={<CopyOutlined />} label={t("复制 URL")} onClick={() => copy(row.title)} />}
+          {canPreview && <IconAction icon={<ExportOutlined />} label={t("独立窗口查看")} onClick={openPreview} />}
+          {canPin && <IconAction icon={<PushpinOutlined />} label={t(pinned ? "取消固定详情" : "固定详情")}
+            aria-pressed={pinned} onClick={onPin} />}
+        </div>
+        <div className="action-group">
+          <IconAction danger icon={<DeleteOutlined />} label={t("删除")} aria-haspopup="dialog"
+            disabled={cannotDelete} onClick={remove} />
         </div>
       </div>
-      {previewError && <Alert type="error" title={t(previewError)} />}
+      <div className="detail-actions record-detail-primary">
+        <Button onClick={onClose} disabled={working}>{t("关闭")}</Button>
+        {allowEdit && <Button type="primary" icon={<EditOutlined />} disabled={working}
+          onClick={() => onEdit({ row: currentRow ?? row, detail: detail.value })}>{t("编辑")}</Button>}
+      </div>
+    </div>;
+  const hasMedia = (section === "cache" && !!detail.value?.video) || (section === "idb" && !!detail.value?.media?.length);
+  const modalSize = editing ? (editor.size ?? (viewJson || section === "idb" ? "lg" : "md"))
+    : (section === "idb" || viewJson || hasMedia) ? "lg" : "md";
+
+  const body = editor ? <div className="record-editor-scroll">{editor.body}</div>
+    : <div className="record-detail-content" data-media={hasMedia || undefined}>
+      {previewError && <Alert type="error" showIcon title={t(previewError)} />}
       {(state.status === "loading" || state.refreshing) && <StateMessage title={t("正在读取详情")} busy />}
       {state.status === "error" && <StateMessage title={t("读取详情失败")}
         action={needsRead && <Button onClick={() => setRetry((value) => value + 1)}>{t("重试")}</Button>}>{state.error}</StateMessage>}
       {!needsRead && state.status === "ready" && !currentRow && <StateMessage title={t("记录已不存在")}>{t("返回列表查看当前数据。")}</StateMessage>}
       {detailReady && !state.refreshing && <>
         {section === "cookies" && <Metadata rows={[
-          ["Domain", cookie.domain], ["Path", cookie.path],
-          [t("到期时间"), cookie.session ? t("会话 Cookie") : new Date(cookie.expirationDate * 1000).toLocaleString(language)],
-          ["SameSite", cookie.sameSite], ["HttpOnly", cookie.httpOnly ? t("是") : t("否")], ["Secure", cookie.secure ? t("是") : t("否")],
+          ["Domain", <span className="data-input">{cookie.domain}</span>],
+          ["Path", <span className="data-input">{cookie.path}</span>],
+          [t("到期时间"), cookie.session ? <Tag>{t("会话 Cookie")}</Tag>
+            : <span className="data-input">{new Date(cookie.expirationDate * 1000).toLocaleString(language)}</span>],
+          ["SameSite", <Tag>{cookie.sameSite}</Tag>],
+          ["HttpOnly", <Tag color={cookie.httpOnly ? "blue" : "default"}>{cookie.httpOnly ? t("是") : t("否")}</Tag>],
+          ["Secure", <Tag color={cookie.secure ? "green" : "default"}>{cookie.secure ? t("是") : t("否")}</Tag>],
         ]} />}
-        {section === "idb" && !detail.value.editable && <Typography.Paragraph type="secondary">{t("该值含有 JSON 无法无损表示的类型，以下为只读预览。")}</Typography.Paragraph>}
+        {section === "idb" && !detail.value.editable && <Alert type="info" showIcon
+          title={t("该值含有 JSON 无法无损表示的类型，以下为只读预览。")} />}
         {section === "cache" && <Metadata rows={[
-          [t("请求方法"), row.preview], [t("响应状态"), detail.value.status], [t("响应类型"), detail.value.type],
-          [t("内容类型"), detail.value.contentType], [t("内容长度"), detail.value.size === null ? null : `${detail.value.size} B`],
+          [t("请求方法"), <Tag>{row.preview}</Tag>],
+          [t("响应状态"), detail.value.status == null ? null : <Tag color={httpStatusColor(detail.value.status)}>{detail.value.status}</Tag>],
+          [t("响应类型"), <span className="data-input">{detail.value.type}</span>],
+          [t("内容类型"), detail.value.contentType == null ? null : <span className="data-input">{detail.value.contentType}</span>],
+          [t("内容长度"), detail.value.size === null ? null : <span className="data-input">{detail.value.size} B</span>],
         ]} />}
         {section === "cache" && detail.value.video && <MediaPreview target={target}
           source={{ kind: "cache", cacheName, id: row.id, name: row.title, ...detail.value.video }} />}
         {section === "idb" && detail.value.media?.map((item) => <MediaPreview key={JSON.stringify(item.path)}
           target={target} source={{ kind: "idb", dbName, storeName, key: row.key, ...item }} />)}
-        {viewJson ? <JsonViewer key={row.id} text={text} /> : text !== undefined &&
-          <pre className="value-block">{text === "" ? <Typography.Text type="secondary">{t("（空字符串）")}</Typography.Text> : text}</pre>}
+        {(viewJson || text !== undefined) && <div className="record-value-pane">
+          {viewJson ? <JsonViewer key={row.id} text={text} />
+            : <pre className="value-block value-block-framed">{text === "" ? <Typography.Text type="secondary">{t("（空字符串）")}</Typography.Text> : text}</pre>}
+        </div>}
       </>}
     </div>;
   return pinned ? <aside className="record-inspector" aria-label={t("记录详情")}
@@ -145,12 +190,13 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
       }
     }}>
     <header className="inspector-header" ref={inspectorHeader} tabIndex={-1}>
-      <Typography.Text strong className="cell-text" title={title}>{title}</Typography.Text>
+      <div className="inspector-heading">{title}</div>
     </header>
-    <div className="inspector-body">{body}</div>
-    <footer className="detail-actions">{footer}</footer>
-  </aside> : <WideModal title={title} onCancel={close} footer={footer} keyboard={!working} closable={!working}>
-    {body}
+    <div className="inspector-body"><div className="record-detail-shell" ref={detailContent}>{body}</div></div>
+    <footer>{footer}</footer>
+  </aside> : <WideModal className="record-detail-modal" size={modalSize}
+    title={title} onCancel={close} footer={footer} keyboard={!working} closable={!working} maskClosable={!editing && !working}>
+    <div className="record-detail-shell" ref={detailContent}>{body}</div>
   </WideModal>;
 }
 
@@ -349,7 +395,7 @@ export default function Records({ target, section, kind, revision, automatic, de
     ? <SearchMatch text={text} query={query.trim()} /> : fallback;
   const columns = [
     ...(section !== "cache" ? [{
-      key: "selected", width: 28, align: "center",
+      key: "selected", width: 36, align: "center", className: "select-column",
       title: <Checkbox aria-label={t("全选当前页")} checked={rows.length > 0 && chosen.length === rows.length}
         indeterminate={chosen.length > 0 && chosen.length < rows.length} disabled={working || !rows.length}
         onChange={(event) => setSelection(new Set(event.target.checked ? rows.map(({ id }) => id) : []))} />,
@@ -387,7 +433,7 @@ export default function Records({ target, section, kind, revision, automatic, de
     ] : []),
     {
       title: section === "cookies" ? t("域名 / 路径") : section === "cache" ? t("方法") : t("值"),
-      key: "value", width: section === "cache" ? 52 : undefined,
+      key: "value", width: section === "cache" ? 56 : undefined,
       render: (_, row) => section === "cookies" ? <span className="cell-lines">
         <span className="cell-text" title={row.cookie.domain}>{matchText(row.cookie.domain)}</span>
         <Typography.Text type="secondary" className="cell-text" title={row.cookie.path}>{matchText(row.cookie.path)}</Typography.Text>
@@ -460,10 +506,10 @@ export default function Records({ target, section, kind, revision, automatic, de
             </div>
           </div>
         </div>
-        {advancedFilter && <div className="detail-actions">
-          <Typography.Text type="secondary">{t(advancedFilter.form.mode === "index" ? "索引" : advancedFilter.form.mode === "exact" ? "精确主键" : "主键范围")}
-            {advancedFilter.query.indexName != null ? ` · ${nameLabel(advancedFilter.query.indexName, t)}` : ""}</Typography.Text>
-          <Button size="small" type="text" onClick={() => { setAdvanced(null); resetView(); }}>{t("清除查询")}</Button>
+        {advancedFilter && <div className="active-filter-bar">
+          <Tag color="processing">{t(advancedFilter.form.mode === "index" ? "索引" : advancedFilter.form.mode === "exact" ? "精确主键" : "主键范围")}
+            {advancedFilter.query.indexName != null ? ` · ${nameLabel(advancedFilter.query.indexName, t)}` : ""}</Tag>
+          <Button size="small" type="link" onClick={() => { setAdvanced(null); resetView(); }}>{t("清除查询")}</Button>
         </div>}
       </div>
       <div className="records-layout" ref={layout} data-split={split && !!detailRow || undefined}>
@@ -486,14 +532,18 @@ export default function Records({ target, section, kind, revision, automatic, de
                 if (canUseMenu && anchor) rowMenu.open(event, row.id, anchor);
               },
               "data-selected": selection.has(row.id) || undefined,
+              "data-active": detailRow?.id === row.id || undefined,
             })} />}
       </div>
-      <footer className="workspace-footer">
+      <footer className="workspace-footer" data-selecting={chosen.length > 0 || undefined}>
         <Typography.Text role="status" type="secondary" className="workspace-count">{chosen.length > 0 ? t("已选 {count} 项", { count: chosen.length })
           : busy || records.refreshing ? t("正在读取…") : listError ? t("读取失败") : section === "idb" && rows.length ? t("第 {page} 页 · {count} 条", { page: index + 1, count: rows.length })
           : t(section === "cookies" ? "{count} 个 Cookie" : "{count} 条记录", { count: filtered.length })}</Typography.Text>
-        {chosen.length > 0 && <Button size="small" danger aria-haspopup="dialog" disabled={working || busy}
-          onClick={() => deleteRows(chosen, true)}>{t("删除所选")}</Button>}
+        {chosen.length > 0 && <div className="action-strip">
+          <Button size="small" type="text" disabled={working} onClick={resetSelection}>{t("取消选择")}</Button>
+          <Button size="small" danger aria-haspopup="dialog" disabled={working || busy}
+            onClick={() => deleteRows(chosen, true)}>{t("删除所选")}</Button>
+        </div>}
         {typeof count.value === "number" && <Typography.Text type="secondary">{t("仓库共 {count} 条", { count: count.value })}</Typography.Text>}
         {!busy && (index > 0 || hasNext) && <div className="page-controls">
           <IconAction icon={<LeftOutlined />} label={t("上一页")} disabled={index === 0} onClick={() => movePage(index - 1)} />

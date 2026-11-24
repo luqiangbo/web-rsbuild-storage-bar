@@ -20,7 +20,7 @@ const chinesePhrases = EditorState.phrases.of({
   "folded code": "已折叠的代码", unfold: "展开",
 });
 
-export default function JsonEditor({ value, original, onChange, readOnly }) {
+export default function JsonEditor({ value, original, onChange, readOnly, meta }) {
   const { t, dark, language } = usePreferences();
   const [preview, setPreview] = useState(false);
   const error = jsonError(value);
@@ -29,19 +29,41 @@ export default function JsonEditor({ value, original, onChange, readOnly }) {
     "aria-label": t("值 (JSON)"), "aria-invalid": String(invalid), spellcheck: "false",
   })], [invalid, language, t]);
   const limit = 4000;
-  return <div className="dialog-stack">
+
+  function reformat(spaces) {
+    if (invalid || readOnly) return;
+    try {
+      const next = JSON.stringify(JSON.parse(value), null, spaces);
+      if (next !== value) onChange(next);
+    } catch {
+      // Ignore if value cannot be parsed cleanly
+    }
+  }
+
+  return <div className="json-editor-wrap">
+    <div className="json-editor-bar">
+      <Typography.Text type={invalid ? "danger" : "secondary"} className="cell-text json-editor-meta" title={meta || "JSON"}>
+        {meta || "JSON"}
+      </Typography.Text>
+      {!readOnly && <div className="action-strip">
+        {value !== original && <Button type="text" size="small" onClick={() => setPreview(!preview)}>
+          {t(preview ? "收起预览" : "预览更改")}
+        </Button>}
+        <Button type="text" size="small" disabled={invalid} onClick={() => reformat(2)}>{t("格式化")}</Button>
+        <Button type="text" size="small" disabled={invalid} onClick={() => reformat(0)}>{t("压缩")}</Button>
+      </div>}
+    </div>
     <CodeMirror className="json-editor" data-invalid={invalid || undefined}
-      height="12rem" value={value} readOnly={readOnly} editable={!readOnly} theme={dark ? "dark" : "light"}
+      height="100%" value={value} readOnly={readOnly} editable={!readOnly} theme={dark ? "dark" : "light"}
       basicSetup={editorSetup} indentWithTab={false} extensions={extensions} onChange={onChange} />
-    {error && <Alert type="error" title={t(error.line == null ? "JSON 格式无效" : "JSON 格式错误（第 {line} 行，第 {column} 列）", error)}
+    {error && <Alert type="error" showIcon title={t(error.line == null ? "JSON 格式无效" : "JSON 格式错误（第 {line} 行，第 {column} 列）", error)}
       description={error.line == null ? error.message : undefined} />}
-    {value !== original && <div>
-      <Button size="small" onClick={() => setPreview(!preview)}>{t(preview ? "收起预览" : "预览更改")}</Button>
-    </div>}
-    {preview && value !== original && <div className="json-diff">
-      {[[t("修改前"), original], [t("修改后"), value]].map(([label, text]) => <div key={label}>
-        <Typography.Text strong>{label}</Typography.Text>
-        <JsonCode text={text.slice(0, limit)} />
+    {preview && value !== original && <div className="json-diff json-editor-diff">
+      {[[t("修改前"), original], [t("修改后"), value]].map(([label, text]) => <div key={label} className="diff-pane">
+        <Typography.Text strong className="diff-pane-label">{label}</Typography.Text>
+        <div className="diff-value-box">
+          <JsonCode text={text.slice(0, limit)} />
+        </div>
         {text.length > limit && <Typography.Text type="secondary">{t("预览已截断")}</Typography.Text>}
       </div>)}
     </div>}

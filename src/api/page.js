@@ -325,7 +325,8 @@ async function executePage(operation, input, expectedOrigin) {
 
   function opfsMediaType(file) {
     const type = file.type.split(";")[0].trim().toLowerCase();
-    if (/^(video|audio|image)\//.test(type)) return type;
+    if (/^(video|audio|image|text)\//.test(type)) return type;
+    if (/^application\/((?:[\w.+-]+\+)?(?:json|xml)|(?:x-)?javascript|(?:x-)?yaml)$/.test(type)) return type;
     if (type && type !== "application/octet-stream") return "";
     if (!file.name.includes(".")) return "";
     const extension = file.name.toLowerCase().split(".").at(-1);
@@ -335,6 +336,19 @@ async function executePage(operation, input, expectedOrigin) {
       png: "image/png", apng: "image/apng", jpg: "image/jpeg", jpeg: "image/jpeg", jfif: "image/jpeg",
       gif: "image/gif", webp: "image/webp", avif: "image/avif", svg: "image/svg+xml",
       bmp: "image/bmp", ico: "image/x-icon",
+      json: "application/json", jsonl: "application/json", ndjson: "application/json",
+      webmanifest: "application/json", map: "application/json",
+      txt: "text/plain", text: "text/plain", log: "text/plain", md: "text/plain", markdown: "text/plain",
+      csv: "text/plain", tsv: "text/plain", ini: "text/plain", cfg: "text/plain", conf: "text/plain",
+      env: "text/plain", toml: "text/plain", yaml: "text/plain", yml: "text/plain", sql: "text/plain",
+      sh: "text/plain", bash: "text/plain", bat: "text/plain", ps1: "text/plain", py: "text/plain",
+      rb: "text/plain", go: "text/plain", rs: "text/plain", java: "text/plain", c: "text/plain",
+      h: "text/plain", cpp: "text/plain", hpp: "text/plain", ts: "text/plain", tsx: "text/plain",
+      jsx: "text/plain", vue: "text/plain", svelte: "text/plain",
+      js: "text/javascript", mjs: "text/javascript", cjs: "text/javascript",
+      css: "text/css", scss: "text/css", less: "text/css",
+      html: "text/html", htm: "text/html",
+      xml: "text/xml", plist: "text/xml", srt: "text/xml", vtt: "text/xml",
     };
     return Object.hasOwn(types, extension) ? types[extension] : videoType("", extension);
   }
@@ -446,6 +460,7 @@ async function executePage(operation, input, expectedOrigin) {
     const rows = [];
     let scanned = 0;
     for await (const entry of directory.values()) {
+      if ((input.filesOnly && entry.kind === "directory") || (input.directoriesOnly && entry.kind !== "directory")) continue;
       if (scanned++ < input.offset) continue;
       if (scanned > input.offset + 50) return { rows, next: input.offset + 50 };
       if (entry.kind === "directory") {
@@ -460,6 +475,24 @@ async function executePage(operation, input, expectedOrigin) {
       }
     }
     return { rows, next: null };
+  }
+
+  async function opfsThumbnail() {
+    const directory = await opfsDirectory(input.path);
+    const file = await (await directory.getFileHandle(input.name)).getFile();
+    if (file.lastModified !== input.modified || file.size !== input.size ||
+      !file.size || file.size > 8 * 1024 * 1024 || !opfsMediaType(file).startsWith("image/")) return null;
+    const bitmap = await createImageBitmap(file);
+    try {
+      const scale = Math.min(1, 320 / Math.max(bitmap.width, bitmap.height));
+      const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)),
+        Math.max(1, Math.round(bitmap.height * scale)));
+      canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const thumbnail = await canvas.convertToBlob({ type: "image/webp", quality: 0.8 });
+      return `data:${thumbnail.type};base64,${encodeBytes(new Uint8Array(await thumbnail.arrayBuffer()))}`;
+    } finally {
+      bitmap.close();
+    }
   }
 
   function cacheVideo(response, url) {
@@ -519,13 +552,15 @@ async function executePage(operation, input, expectedOrigin) {
           const directory = await opfsDirectory(input.path);
           const handle = await directory.getFileHandle(input.name);
           file = await handle.getFile();
-          if (file.size !== input.size || file.lastModified !== input.modified || opfsMediaType(file) !== input.type) {
+          const detected = opfsMediaType(file);
+          if (file.size !== input.size || file.lastModified !== input.modified || (!input.raw && detected !== input.type)) {
             throw new Error("文件已变化，请刷新");
           }
+          Object.assign(job, { type: input.raw ? (file.type || "application/octet-stream") : input.type, total: file.size, file });
         } else {
           throw new Error("未知媒体来源");
         }
-        Object.assign(job, { type: input.type, total: file.size, file });
+        if (input.kind !== "opfs") Object.assign(job, { type: input.type, total: file.size, file });
       }
       if (!state.media.has(input.ticket)) {
         if (job.reader) void job.reader.cancel().catch(() => {});
@@ -559,11 +594,15 @@ async function executePage(operation, input, expectedOrigin) {
     }
     if (job.offset + bytes.length > mediaLimit) throw new Error("文件超过 50 MiB，已停止读取");
     job.offset += bytes.length;
+    return { data: encodeBytes(bytes), done: job.file ? job.offset >= job.total : false };
+  }
+
+  function encodeBytes(bytes) {
     let ascii = "";
     for (let index = 0; index < bytes.length; index += 8192) {
       ascii += String.fromCharCode(...bytes.subarray(index, index + 8192));
     }
-    return { data: btoa(ascii), done: job.file ? job.offset >= job.total : false };
+    return btoa(ascii);
   }
 
   try {
@@ -728,6 +767,9 @@ async function executePage(operation, input, expectedOrigin) {
         break;
       case "opfsList":
         data = await listOpfs();
+        break;
+      case "opfsThumbnail":
+        data = await opfsThumbnail();
         break;
       case "mediaStart":
         data = await startMedia();

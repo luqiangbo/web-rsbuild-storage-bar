@@ -8,11 +8,22 @@ import { usePreferences } from "./preferences.js";
 
 SyntaxHighlighter.registerLanguage("json", json);
 
+const codeStyle = {
+  margin: 0,
+  padding: "10px 12px",
+  fontFamily: "var(--mono)",
+  fontSize: "12.5px",
+  lineHeight: 1.55,
+  background: "transparent",
+};
+
 export default function JsonCode({ text }) {
   const preferences = usePreferences();
-  if (text.length > jsonTreeLimit) return <pre className="value-block">{text}</pre>;
-  return <SyntaxHighlighter className="value-block" language="json" style={preferences.dark ? dark : light}
-    customStyle={{ margin: 0, fontFamily: "var(--mono)" }} codeTagProps={{ style: { fontFamily: "inherit" } }} wrapLongLines>
-    {text}
-  </SyntaxHighlighter>;
+  if (text.length > jsonTreeLimit) return <pre className="value-block value-block-framed">{text}</pre>;
+  return <div className="value-block-framed json-code-frame">
+    <SyntaxHighlighter className="value-block" language="json" style={preferences.dark ? dark : light}
+      customStyle={codeStyle} codeTagProps={{ style: { fontFamily: "inherit" } }} wrapLongLines>
+      {text}
+    </SyntaxHighlighter>
+  </div>;
 }

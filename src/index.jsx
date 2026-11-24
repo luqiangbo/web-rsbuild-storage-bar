@@ -42,8 +42,27 @@ function Extension() {
   }, [dark, language, prefs.font]);
   return <Preferences.Provider value={preferences}>
     <ConfigProvider locale={language === "zh" ? zhCN : enUS}
-      theme={{ algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm, cssVar: true,
-        token: { fontFamily: 'system-ui, "Microsoft YaHei UI", sans-serif' } }}>
+      theme={{
+        algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        cssVar: true,
+        token: {
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", sans-serif',
+          borderRadius: 6,
+          borderRadiusLG: 12,
+          borderRadiusSM: 4,
+          motionDurationMid: "0.18s",
+          motionDurationSlow: "0.22s",
+        },
+        components: {
+          Modal: {
+            titleFontSize: 15,
+            titleLineHeight: 1.4,
+          },
+          Table: {
+            headerBorderRadius: 6,
+          },
+        },
+      }}>
       <App className="extension-app">
         <ErrorBoundary t={t}><StorageBar /></ErrorBoundary>
       </App>

@@ -1,9 +1,54 @@
 import React from "react";
 import { Modal } from "antd";
 
-export default function WideModal({ children, ...props }) {
-  return <Modal open centered width="min(760px, calc(100vw - 16px))" className="wide-modal"
-    classNames={{ body: "wide-modal-body" }} mask={{ closable: false }} {...props}>
-    {children}
-  </Modal>;
+const widths = {
+  sm: "min(440px, calc(100vw - 20px))",
+  md: "min(560px, calc(100vw - 20px))",
+  lg: "min(780px, calc(100vw - 20px))",
+};
+
+export default function WideModal({
+  children,
+  className,
+  size = "lg",
+  subtitle,
+  title,
+  closable = true,
+  maskClosable = false,
+  ...props
+}) {
+  const modalTitle = subtitle ? (
+    <div className="wide-modal-heading">
+      <div className="wide-modal-title-row">{title}</div>
+      <div className="wide-modal-subtitle">{subtitle}</div>
+    </div>
+  ) : title;
+
+  const mergedClassName = [
+    "wide-modal",
+    `wide-modal-${size}`,
+    className,
+  ].filter(Boolean).join(" ");
+
+  return (
+    <Modal
+      open
+      centered
+      width={widths[size] ?? widths.lg}
+      title={modalTitle}
+      closable={closable}
+      className={mergedClassName}
+      classNames={{
+        wrapper: "wide-modal-wrap",
+        container: "wide-modal-container",
+        header: "wide-modal-header",
+        body: "wide-modal-body",
+        footer: "wide-modal-footer",
+      }}
+      mask={{ closable: maskClosable && closable !== false, blur: true }}
+      {...props}
+    >
+      {children}
+    </Modal>
+  );
 }

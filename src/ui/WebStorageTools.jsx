@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Segmented, Table, Tag, Typography, Upload } from "antd";
+import { Alert, Button, Checkbox, Empty, Segmented, Spin, Table, Tag, Typography, Upload } from "antd";
 import { runInPage } from "../api/page.js";
 import { compareWebStorage, makeWebBackup, parseWebBackup } from "../api/webStorage.js";
 import { usePreferences } from "./preferences.js";
@@ -18,11 +18,13 @@ const colors = { added: "success", changed: "processing", removed: "error", conf
 
 function ComparedValue({ value, label }) {
   const { t } = usePreferences();
-  return <div className="dialog-stack">
-    <Typography.Text strong>{t(label)}</Typography.Text>
-    {value === undefined ? <Typography.Text type="secondary">{t("不存在")}</Typography.Text>
-      : value === "" ? <Typography.Text type="secondary">{t("（空字符串）")}</Typography.Text>
-        : jsonError(value) ? <pre className="value-block">{value}</pre> : <JsonViewer text={value} rawDefault />}
+  return <div className="dialog-stack diff-pane">
+    <Typography.Text strong className="diff-pane-label">{t(label)}</Typography.Text>
+    <div className="diff-value-box">
+      {value === undefined ? <Typography.Text type="secondary">{t("不存在")}</Typography.Text>
+        : value === "" ? <Typography.Text type="secondary">{t("（空字符串）")}</Typography.Text>
+          : jsonError(value) ? <pre className="value-block value-block-framed">{value}</pre> : <JsonViewer text={value} />}
+    </div>
   </div>;
 }
 
@@ -127,38 +129,48 @@ export default function WebStorageTools({ mode, target, kind, selected, baseline
   const status = (value) => <Tag color={colors[value]}>{t(labels[value])}</Tag>;
   const counts = report?.reduce((sum, row) => ({ ...sum, [row.status]: sum[row.status] + 1 }), { success: 0, skipped: 0, failed: 0 });
   const titles = { diff: "存储变化对比", import: "导入 Web Storage", export: "导出 Web Storage", undo: "撤销删除" };
-  return <WideModal title={t(titles[mode])} onCancel={onClose} closable={!working} keyboard={!working} footer={[
-    <Button key="close" disabled={working} onClick={onClose}>{t("关闭")}</Button>,
-    mode === "diff" && <Button key="compare" type="primary" disabled={!baseline} loading={working} onClick={compare}>{t("对比当前")}</Button>,
-    mode === "import" && !report && <Button key="import" type="primary" loading={working}
-      disabled={!preview?.entries.length || (crossSite && !crossConfirmed)} onClick={() => restore(preview.entries)}>{t("确认导入")}</Button>,
-    mode === "export" && <Button key="download" type="primary" disabled={!exportRows.length} loading={working}
-      onClick={() => perform(async () => {
-        await verify(target);
-        downloadJson(makeWebBackup(target.origin, kind, exportRows), `storagebar-${kind}-${target.hostname.replace(/[^a-z\d.-]/gi, "_")}.json`);
-        notify(t("Web Storage 备份已交给浏览器下载"));
-        onClose();
-      })}>{t("下载 JSON")}</Button>,
-    mode === "undo" && !report && <Button key="undo" type="primary" loading={working}
-      disabled={!undo?.entries.length} onClick={() => restore(undo.entries)}>{t("撤销删除")}</Button>,
-  ]}>
+  const modalSize = mode === "export" || (mode === "undo" && !report) ? "sm" : "lg";
+  const canBackdropClose = !working && (mode === "export" || (mode === "undo" && !report) || (mode === "diff" && !diff) || (mode === "import" && !preview && !report));
+
+  return <WideModal size={modalSize} title={t(titles[mode])}
+    maskClosable={canBackdropClose} onCancel={onClose} closable={!working} keyboard={!working} footer={[
+      <Button key="close" disabled={working} onClick={onClose}>{t("关闭")}</Button>,
+      mode === "diff" && <Button key="compare" type="primary" disabled={!baseline} loading={working} onClick={compare}>{t("对比当前")}</Button>,
+      mode === "import" && !report && <Button key="import" type="primary" loading={working}
+        disabled={!preview?.entries.length || (crossSite && !crossConfirmed)} onClick={() => restore(preview.entries)}>{t("确认导入")}</Button>,
+      mode === "export" && <Button key="download" type="primary" disabled={!exportRows.length} loading={working}
+        onClick={() => perform(async () => {
+          await verify(target);
+          downloadJson(makeWebBackup(target.origin, kind, exportRows), `storagebar-${kind}-${target.hostname.replace(/[^a-z\d.-]/gi, "_")}.json`);
+          notify(t("Web Storage 备份已交给浏览器下载"));
+          onClose();
+        })}>{t("下载 JSON")}</Button>,
+      mode === "undo" && !report && <Button key="undo" type="primary" loading={working}
+        disabled={!undo?.entries.length} onClick={() => restore(undo.entries)}>{t("撤销删除")}</Button>,
+    ]}>
     <div className="dialog-stack">
-      <Typography.Text code className="dialog-wrap">{target.origin} · {label}</Typography.Text>
-      {error && <Alert type="error" title={t(error)} />}
+      {error && <Alert type="error" showIcon title={t(error)} />}
       {mode === "diff" && <>
-        <div className="detail-actions">
-          <Button disabled={working} onClick={capture}>{t(baseline ? "更新基线" : "记为基线")}</Button>
-          {baseline && <Typography.Text type="secondary">{t("基线时间：{time}", {
+        <div className="modal-toolbar-card">
+          <Button size="small" disabled={working} onClick={capture}>{t(baseline ? "更新基线" : "记为基线")}</Button>
+          {baseline ? <Typography.Text type="secondary">{t("基线时间：{time}", {
             time: new Date(baseline.time).toLocaleString(language === "zh" ? "zh-CN" : "en"),
-          })}</Typography.Text>}
+          })}</Typography.Text>
+            : <Typography.Text type="secondary">{t("在网页操作前记下基线，再回来对比变化。")}</Typography.Text>}
         </div>
-        {!baseline && <Typography.Text type="secondary">{t("在网页操作前记下基线，再回来对比变化。")}</Typography.Text>}
         {diff?.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有变化")} />}
-        {diff?.length > 0 && <Table size="small" tableLayout="fixed" rowKey="key" pagination={pages} dataSource={diff} columns={[
-          { title: t("键"), dataIndex: "key", render: (key, row) =>
-            <Button type="link" size="small" className="cell-text data-input" title={key} onClick={() => setFocused(row)}>{formatKey(key)}</Button> },
-          { title: t("状态"), dataIndex: "status", width: 95, render: status },
-        ]} />}
+        {diff?.length > 0 && <div className="metadata-card">
+          <Table className="compact-table diff-table" size="small" tableLayout="fixed" rowKey="key" pagination={pages} dataSource={diff}
+            onRow={(row) => ({
+              onClick: () => setFocused(row),
+              "data-active": focused?.key === row.key || undefined,
+            })}
+            columns={[
+              { title: t("键"), dataIndex: "key", render: (key, row) =>
+                <Button type="link" size="small" className="cell-text data-input diff-key-btn" title={key} onClick={() => setFocused(row)}>{formatKey(key)}</Button> },
+              { title: t("状态"), dataIndex: "status", width: 95, render: status },
+            ]} />
+        </div>}
         {focused && <>
           <Typography.Text code className="dialog-wrap">{formatKey(focused.key)}</Typography.Text>
           <div className="json-diff"><ComparedValue key={`before-${focused.key}`} label="修改前" value={focused.previous} />
@@ -166,12 +178,17 @@ export default function WebStorageTools({ mode, target, kind, selected, baseline
         </>}
       </>}
       {mode === "export" && <>
-        {selected.length > 0 && <Segmented value={exportScope} onChange={setExportScope}
-          options={[{ value: "selected", label: t("仅选中项") }, { value: "all", label: t("整个存储区") }]} />}
-        {exported.status === "loading" && <Typography.Text role="status">{t("正在读取…")}</Typography.Text>}
-        {exported.status === "error" && <Alert type="error" title={t(exported.error)}
-          action={<Button onClick={() => setRetry((value) => value + 1)}>{t("重试")}</Button>} />}
-        {exported.status === "ready" && <Typography.Text>{t("{count} 条记录", { count: exportRows.length })}</Typography.Text>}
+        {selected.length > 0 && <div className="form-field">
+          <span>{t("导出范围")}</span>
+          <Segmented block value={exportScope} onChange={setExportScope}
+            options={[{ value: "selected", label: t("仅选中项") }, { value: "all", label: t("整个存储区") }]} />
+        </div>}
+        {exported.status === "loading" && <div className="modal-stat-card"><Spin size="small" /><Typography.Text role="status">{t("正在读取…")}</Typography.Text></div>}
+        {exported.status === "error" && <Alert type="error" showIcon title={t(exported.error)}
+          action={<Button size="small" onClick={() => setRetry((value) => value + 1)}>{t("重试")}</Button>} />}
+        {exported.status === "ready" && <div className="modal-stat-card">
+          <Typography.Text>{t("{count} 条记录", { count: exportRows.length })}</Typography.Text>
+        </div>}
       </>}
       {mode === "import" && !report && <>
         <div>
@@ -181,27 +198,41 @@ export default function WebStorageTools({ mode, target, kind, selected, baseline
         </div>
         {preview && <>
           <Typography.Text code className="dialog-wrap">{t("来源：{origin}", { origin: preview.origin })}</Typography.Text>
-          {crossSite && <Alert type="warning" title={t("此备份来自其他 Origin。")}
+          {crossSite && <Alert type="warning" showIcon title={t("此备份来自其他 Origin。")}
             description={<Checkbox checked={crossConfirmed} disabled={working}
               onChange={(event) => setCrossConfirmed(event.target.checked)}>{t("确认跨站导入到当前目标")}</Checkbox>} />}
-          {preview.entries.some(({ expected }) => expected !== null) && <Segmented disabled={working} value={overwrite ? "overwrite" : "skip"}
+          {preview.entries.some(({ expected }) => expected !== null) && <Segmented block disabled={working} value={overwrite ? "overwrite" : "skip"}
             onChange={(value) => setOverwrite(value === "overwrite")}
             options={[{ value: "skip", label: t("跳过冲突") }, { value: "overwrite", label: t("覆盖冲突") }]} />}
-          <Table size="small" tableLayout="fixed" rowKey="key" pagination={pages} dataSource={preview.entries} columns={[
-            { title: t("键"), dataIndex: "key", ellipsis: true, render: formatKey },
-            { title: t("状态"), width: 95, render: (_, row) => status(row.expected === null ? "added" : "conflict") },
-          ]} />
+          <div className="metadata-card">
+            <Table className="compact-table" size="small" tableLayout="fixed" rowKey="key" pagination={pages} dataSource={preview.entries} columns={[
+              { title: t("键"), dataIndex: "key", ellipsis: true, render: (key) => <span className="data-input">{formatKey(key)}</span> },
+              { title: t("状态"), width: 95, render: (_, row) => status(row.expected === null ? "added" : "conflict") },
+            ]} />
+          </div>
         </>}
       </>}
-      {mode === "undo" && !report && <Typography.Text type="secondary">{t("恢复已删除的记录。网页重新写入的键会跳过。")}</Typography.Text>}
+      {mode === "undo" && !report && <>
+        <Typography.Text type="secondary">{t("恢复已删除的记录。网页重新写入的键会跳过。")}</Typography.Text>
+        {undo?.entries?.length > 0 && <div className="modal-stat-card undo-preview-card">
+          <Typography.Text strong>{t("共 {count} 项", { count: undo.entries.length })}</Typography.Text>
+          <div className="summary-strip">
+            {undo.entries.slice(0, 8).map(({ key }) => <Tag key={key} className="data-input">{formatKey(key)}</Tag>)}
+            {undo.entries.length > 8 && <Tag>+{undo.entries.length - 8}</Tag>}
+          </div>
+        </div>}
+      </>}
       {report && <>
-        <Alert type={counts.failed ? "warning" : "success"} title={t("处理结果：成功 {success} · 跳过 {skipped} · 失败 {failed}", counts)} />
-        <Table size="small" tableLayout="fixed" rowKey="name" pagination={pages} dataSource={report} columns={[
-          { title: t("键"), dataIndex: "name", render: (name, row) => <div className="dialog-wrap">
-            {formatKey(name)}{row.detail && <div><Typography.Text type="secondary">{t(row.detail)}</Typography.Text></div>}
-          </div> },
-          { title: t("状态"), width: 95, dataIndex: "status", render: status },
-        ]} />
+        <Alert type={counts.failed ? "warning" : "success"} showIcon title={t("处理结果：成功 {success} · 跳过 {skipped} · 失败 {failed}", counts)} />
+        <div className="metadata-card">
+          <Table className="compact-table" size="small" tableLayout="fixed" rowKey="name" pagination={pages} dataSource={report} columns={[
+            { title: t("键"), dataIndex: "name", render: (name, row) => <div className="dialog-wrap">
+              <span className="data-input">{formatKey(name)}</span>
+              {row.detail && <div><Typography.Text type="secondary">{t(row.detail)}</Typography.Text></div>}
+            </div> },
+            { title: t("状态"), width: 95, dataIndex: "status", render: status },
+          ]} />
+        </div>
       </>}
     </div>
   </WideModal>;

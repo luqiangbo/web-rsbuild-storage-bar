@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  DeleteOutlined, ExportOutlined, LockOutlined, ReloadOutlined, SettingOutlined, UnlockOutlined, VideoCameraOutlined,
+  DatabaseOutlined, DeleteOutlined, ExclamationCircleFilled, ExportOutlined, LockOutlined, ReloadOutlined, SettingOutlined, UnlockOutlined, VideoCameraOutlined,
 } from "@ant-design/icons";
-import { Alert, App, Badge, Button, Checkbox, DatePicker, Input, Select, Table, Tabs, Tag, Tooltip, Typography } from "antd";
+import { Alert, App, Badge, Button, Checkbox, DatePicker, Input, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import { cookieSameSite, deleteCookies, getSiteCookies, saveCookie } from "../api/cookies.js";
@@ -19,7 +19,7 @@ import WideModal from "./WideModal.jsx";
 import useFeedback from "./useFeedback.jsx";
 
 const sections = [
-  ["idb", "IndexedDB"], ["cookies", "Cookies"], ["storage", "Storage"], ["cache", "Cache"],
+  ["cookies", "Cookies"], ["storage", "Storage"], ["idb", "IndexedDB"], ["cache", "Cache"],
 ];
 const categories = [
   ["idb", "IndexedDB"], ["cookies", "Cookies"], ["local", "LocalStorage"],
@@ -91,8 +91,11 @@ function Editor({ draft, setDraft, working, stale, savingError, save }) {
   const setCookie = (name, value) => setDraft((current) => ({
     ...current, cookie: { ...current.cookie, [name]: value },
   }));
-  return <form id={editorForm} onSubmit={(event) => { event.preventDefault(); if (!stale && !working) void save(); }}>
-      <p className="modal-origin">{draft.target.origin}<br />{draft.label}</p>
+  const idbMeta = section === "idb" && !needsKey ? (editing
+    ? t("主键 {key}", { key: row.title })
+    : t(store.autoIncrement ? "键路径 {path} · 自动生成" : "键路径 {path}", { path: JSON.stringify(store.keyPath) })) : null;
+  return <form id={editorForm} className={`record-editor-form${cookie ? " is-cookie-form" : ""}`}
+    onSubmit={(event) => { event.preventDefault(); if (!stale && !working) void save(); }}>
       {stale && <Alert className="form-alert" type="warning" title={t("目标已变化。可复制此草稿，保存已停用。")} showIcon />}
       {savingError && <Alert className="form-alert" type="error" title={t(savingError)} showIcon />}
       {renderKey && <label className="form-field">
@@ -101,47 +104,50 @@ function Editor({ draft, setDraft, working, stale, savingError, save }) {
           spellCheck={false} onChange={(event) => set("key", event.target.value)} />
         {section === "idb" && <small>{t("字符串主键需要双引号，例如 \"user-1\"。")}</small>}
       </label>}
-      {section === "idb" && !needsKey && <p className="form-hint">{editing
-        ? t("主键 {key} · 编辑时保留原主键", { key: row.title })
-        : t(store.autoIncrement ? "键路径 {path} · 支持自动生成" : "键路径 {path}", { path: JSON.stringify(store.keyPath) })}</p>}
-      {draft.json ? <div className="form-field"><span>{t("值 (JSON)")}</span>
-        <JsonEditor value={draft.value} original={draft.initialValue} readOnly={stale || working} onChange={setJsonValue} />
-      </div> : <label className="form-field"><span>{t("值")}</span>
-        <Input.TextArea className="data-input" rows={5} value={draft.value} readOnly={stale || working}
+      {draft.json ? <div className="form-field form-field-grow">
+        <JsonEditor value={draft.value} original={draft.initialValue} readOnly={stale || working} onChange={setJsonValue} meta={idbMeta} />
+      </div> : <label className={`form-field${cookie ? "" : " form-field-grow"}`}>
+        <span>{idbMeta || t("值")}</span>
+        <Input.TextArea className={`data-input${cookie ? "" : " record-textarea"}`} rows={cookie ? 4 : 6} value={draft.value} readOnly={stale || working}
           spellCheck={false} onChange={(event) => set("value", event.target.value)} />
       </label>}
       {cookie && <>
         <div className="scope-fields">
           <label className="form-field"><span>{t("域名")}</span>
-            <Input value={cookie.hostOnly ? draft.target.hostname : cookie.domain}
+            <Input className="data-input" value={cookie.hostOnly ? draft.target.hostname : cookie.domain}
               readOnly={editing || stale || working || cookie.hostOnly}
               onChange={(event) => setCookie("domain", event.target.value)} />
           </label>
           <label className="form-field"><span>{t("路径")}</span>
-            <Input value={cookie.path} readOnly={editing || stale || working}
+            <Input className="data-input" value={cookie.path} readOnly={editing || stale || working}
               onChange={(event) => setCookie("path", event.target.value)} />
           </label>
         </div>
         <div className="form-field">
-          <Checkbox checked={cookie.hostOnly} disabled={editing || stale || working}
-            onChange={(event) => setCookie("hostOnly", event.target.checked)}>{t("仅限当前主机")}</Checkbox>
-          <Checkbox checked={cookie.secure} disabled={stale || working}
-            onChange={(event) => setCookie("secure", event.target.checked)}>Secure</Checkbox>
-          <Checkbox checked={cookie.httpOnly} disabled={stale || working}
-            onChange={(event) => setCookie("httpOnly", event.target.checked)}>HttpOnly</Checkbox>
+          <span>{t("属性")}</span>
+          <div className="cookie-flags-row">
+            <Checkbox checked={cookie.hostOnly} disabled={editing || stale || working}
+              onChange={(event) => setCookie("hostOnly", event.target.checked)}>{t("仅限当前主机")}</Checkbox>
+            <Checkbox checked={cookie.secure} disabled={stale || working}
+              onChange={(event) => setCookie("secure", event.target.checked)}>Secure</Checkbox>
+            <Checkbox checked={cookie.httpOnly} disabled={stale || working}
+              onChange={(event) => setCookie("httpOnly", event.target.checked)}>HttpOnly</Checkbox>
+          </div>
         </div>
-        <div className="form-field"><span>SameSite</span>
-          <Select aria-label="SameSite" value={cookie.sameSite} disabled={stale || working}
-            options={cookieSameSite.map((value) => ({ value, label: t(sameSiteLabel[value]) }))}
-            onChange={(value) => setCookie("sameSite", value)} />
+        <div className="scope-fields">
+          <div className="form-field"><span>SameSite</span>
+            <Select aria-label="SameSite" value={cookie.sameSite} disabled={stale || working}
+              options={cookieSameSite.map((value) => ({ value, label: t(sameSiteLabel[value]) }))}
+              onChange={(value) => setCookie("sameSite", value)} />
+          </div>
+          <label className="form-field"><span>{t("到期时间（本地时间）")}</span>
+            <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" disabled={stale || working} style={{ width: "100%" }}
+              classNames={{ popup: { root: "cookie-expiration-popup" } }}
+              value={draft.expiration ? dayjs(draft.expiration).locale(language === "zh" ? "zh-cn" : "en") : null}
+              onChange={(value) => set("expiration", value?.format("YYYY-MM-DDTHH:mm:ss") ?? "")} />
+            <small>{t("留空时保存为会话 Cookie。")}</small>
+          </label>
         </div>
-        <label className="form-field"><span>{t("到期时间（本地时间）")}</span>
-          <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" disabled={stale || working}
-            classNames={{ popup: { root: "cookie-expiration-popup" } }}
-            value={draft.expiration ? dayjs(draft.expiration).locale(language === "zh" ? "zh-cn" : "en") : null}
-            onChange={(value) => set("expiration", value?.format("YYYY-MM-DDTHH:mm:ss") ?? "")} />
-          <small>{t("留空时保存为会话 Cookie。")}</small>
-        </label>
       </>}
     </form>;
 }
@@ -149,9 +155,11 @@ function Editor({ draft, setDraft, working, stale, savingError, save }) {
 export default function StorageBar() {
   const { prefs, savePrefs, t } = usePreferences();
   const { modal } = App.useApp();
+  const [area, setArea] = useState(workbench && route.get("area") === "media" ? "media" : "storage");
   const [section, setSection] = useState(initialSection ?? prefs.section);
   const [kind, setKind] = useState(workbench && route.get("kind") === "session" ? "session" : "local");
   const [revision, setRevision] = useState(0);
+  const [mediaRevision, setMediaRevision] = useState(0);
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [draft, setDraft] = useState(null);
@@ -163,11 +171,11 @@ export default function StorageBar() {
   const [transfer, setTransfer] = useState(null);
   const [webBaselines, setWebBaselines] = useState({});
   const [webUndo, setWebUndo] = useState(null);
-  const [mediaTarget, setMediaTarget] = useState(null);
   const [targetPickerOpen, setTargetPickerOpen] = useState(false);
   const busy = useRef(false);
   const focusReturn = useRef(null);
   const settingsButton = useRef(null);
+  const mediaLocation = useRef(null);
   const targetControl = useTarget(workbench, initialTabId);
   const { target, assertCurrent, notice: targetNotice, dismissNotice } = targetControl;
   const notify = useFeedback();
@@ -191,20 +199,22 @@ export default function StorageBar() {
   useEffect(() => {
     if (!workbench || target.status === "loading") return;
     const url = new URL(location.href);
+    if (area === "media") url.searchParams.set("area", "media");
+    else url.searchParams.delete("area");
     url.searchParams.set("section", section);
     if (section === "storage") url.searchParams.set("kind", kind);
     else url.searchParams.delete("kind");
     if (target.tabId == null) url.searchParams.delete("target");
     else url.searchParams.set("target", String(target.tabId));
     history.replaceState(null, "", url);
-  }, [target.status, target.tabId, section, kind]);
+  }, [target.status, target.tabId, area, section, kind]);
   const currentPending = pending && pending.target.key === target.key ? pending : null;
   const pendingNames = new Set(currentPending?.names);
   const bump = () => setRevision((value) => value + 1);
   const rememberFocus = (fallback) => { focusReturn.current = { element: document.activeElement, fallback }; };
   const openConfirm = (action) => { rememberFocus(action.focus); setOpError(""); setConfirm(action); };
   const overlayOpen = !!(settings || (draft && !draft.fromDetail) || (draft && draft.target.key !== target.key) ||
-    confirm || report || transfer || mediaTarget);
+    confirm || report || transfer);
   useEffect(() => {
     if (overlayOpen || !focusReturn.current) return;
     const { element, fallback } = focusReturn.current;
@@ -273,8 +283,11 @@ export default function StorageBar() {
 
   function refresh() {
     if (isReady) {
-      bump();
-      void targetControl.read({ invalidate: false });
+      if (area === "media") setMediaRevision((value) => value + 1);
+      else {
+        bump();
+        void targetControl.read({ invalidate: false });
+      }
     } else {
       void targetControl.read();
     }
@@ -428,12 +441,14 @@ export default function StorageBar() {
     if (draftFields(draft) === draft.original) { setDraft(null); return; }
     modal.confirm({
       title: t("放弃未保存的更改？"), okText: t("放弃更改"), cancelText: t("继续编辑"),
-      okButtonProps: { danger: true }, onOk: () => setDraft(null), width: "min(480px, calc(100vw - 16px))",
+      okButtonProps: { danger: true }, onOk: () => setDraft(null),
+      centered: true, mask: { blur: true }, width: "min(400px, calc(100vw - 24px))",
     });
   };
   async function openWorkbench() {
     const url = new URL(chrome.runtime.getURL("index.html"));
     url.searchParams.set("view", "workspace");
+    if (area === "media") url.searchParams.set("area", "media");
     url.searchParams.set("section", section);
     if (section === "storage") url.searchParams.set("kind", kind);
     if (target.tabId != null && target.origin) url.searchParams.set("target", String(target.tabId));
@@ -442,6 +457,7 @@ export default function StorageBar() {
   }
   const editor = draft && {
     title: draft.row ? t("编辑记录") : draft.cookie ? t("新增 Cookie") : t("新增记录"),
+    size: draft.json ? "lg" : "md",
     body: <Editor draft={draft} setDraft={setDraft} working={working} stale={draftStale} savingError={opError} save={saveEditor} />,
     footer: [
       <Button key="cancel" disabled={working} onClick={closeEditor}>{t("取消")}</Button>,
@@ -453,6 +469,17 @@ export default function StorageBar() {
     onCancel: closeEditor,
   };
   const confirmStale = confirm && (!isReady || confirm.target.key !== target.key);
+  const targetStatus = target.status === "loading" ? targetControl.waiting
+    ? <StateMessage title={t("正在等待网页导航")}
+      action={<Button onClick={refresh}>{t("重试")}</Button>}>{t("网页可访问后会自动显示数据。")}</StateMessage>
+    : <StateMessage title={t("正在定位标签页")} busy />
+    : target.status === "permission" ? <StateMessage title={t("Chrome 未授予此站点访问权限")}
+      action={<div className="detail-actions">
+        <Button type="primary" onClick={() => void openAccessSettings()}>{t("打开站点访问设置")}</Button>
+        <Button onClick={refresh}>{t("重试")}</Button>
+      </div>}>{t("在 Chrome 扩展详情中允许访问此站点，或选择「在所有网站上」。")}</StateMessage>
+    : <StateMessage title={t("无法访问目标页面")} action={target.status === "access-error" &&
+      <Button onClick={refresh}>{t("重试")}</Button>}>{target.reason}</StateMessage>;
   const workspace = <section className="workspace" aria-label={t("存储记录")}>
     {isReady ? <Records key={JSON.stringify([target.key, section, section === "storage" ? kind : null])}
       target={target} section={section} kind={kind} setKind={setKind} revision={revision}
@@ -464,27 +491,24 @@ export default function StorageBar() {
       undo={webUndo?.targetKey === target.key && webUndo?.kind === kind ? webUndo : null}
       rememberUndo={(area, entries) => setWebUndo({ targetKey: target.key, kind: area, entries })}
       forgetUndo={() => setWebUndo(null)} verify={verify} onWebWrite={bump}
-      pendingNames={pendingNames} trackPending={trackPending} />
-      : target.status === "loading" ? targetControl.waiting
-        ? <StateMessage title={t("正在等待网页导航")}
-          action={<Button onClick={refresh}>{t("重试")}</Button>}>{t("网页可访问后会自动显示数据。")}</StateMessage>
-        : <StateMessage title={t("正在定位标签页")} busy />
-      : target.status === "permission" ? <StateMessage title={t("Chrome 未授予此站点访问权限")}
-        action={<div className="detail-actions">
-          <Button type="primary" onClick={() => void openAccessSettings()}>{t("打开站点访问设置")}</Button>
-          <Button onClick={refresh}>{t("重试")}</Button>
-        </div>}>{t("在 Chrome 扩展详情中允许访问此站点，或选择「在所有网站上」。")}</StateMessage>
-      : <StateMessage title={t("无法访问目标页面")} action={target.status === "access-error" &&
-        <Button onClick={refresh}>{t("重试")}</Button>}>{target.reason}</StateMessage>}
+      pendingNames={pendingNames} trackPending={trackPending} /> : targetStatus}
   </section>;
+  const showMedia = area === "media";
+  const workspaceSwitch = <div className="workspace-switch" role="group" aria-label={t("工作区")}>
+    <IconAction icon={<DatabaseOutlined />} label={t("本地存储")} aria-pressed={!showMedia}
+      aria-controls="storagebar-workspace" disabled={!!draft || working} onClick={() => setArea("storage")} />
+    <IconAction icon={<VideoCameraOutlined />} label={t("本地媒体")} aria-pressed={showMedia}
+      aria-controls="storagebar-workspace" disabled={!!draft || working} onClick={() => setArea("media")} />
+  </div>;
 
   return <main className="app-shell" data-surface={workbench ? "workspace" : "panel"}>
     <header className="app-header">
-      <div className="target-picker">
-        <Badge status={isReady ? "success" : "default"} aria-hidden="true" />
+      {workspaceSwitch}
+      <Space.Compact size="small" className="target-picker">
         <Tooltip title={targetPickerOpen ? null : targetOrigin} trigger={["hover", "focus"]}>
           <Select size="small" className="target-select" aria-label={targetOrigin ? t("目标标签页，{origin}", { origin: targetOrigin }) : t("目标标签页")}
             value={currentTab?.value}
+            prefix={<Badge status={isReady ? "success" : "default"} aria-hidden="true" />}
             placeholder={target.status === "loading" ? t("正在定位标签页…") : target.tabId == null ? t("选择标签页") : t("当前页不可访问")}
             options={tabOptions} popupMatchSelectWidth={240} onOpenChange={setTargetPickerOpen}
             optionRender={({ data: option }) => <span className="cell-lines">
@@ -493,23 +517,16 @@ export default function StorageBar() {
             </span>}
             onChange={targetControl.select} />
         </Tooltip>
-        {workbench && currentTab && <Tooltip title={t("工作台已锁定目标")}>
-          <LockOutlined aria-label={t("工作台已锁定目标")} />
-        </Tooltip>}
-        {!workbench && <IconAction type={targetControl.locked ? "primary" : "text"} aria-pressed={targetControl.locked}
+        {workbench ? currentTab && <IconAction type="default" className="target-lock" icon={<LockOutlined />}
+          label={t("工作台已锁定目标")} aria-disabled="true" />
+          : <IconAction type="default" className="target-lock" aria-pressed={targetControl.locked}
           icon={targetControl.locked ? <LockOutlined /> : <UnlockOutlined />}
           label={targetControl.locked ? t("已锁定，点击恢复跟随") : t("跟随中，点击锁定当前标签页")}
           disabled={target.tabId == null} onClick={targetControl.toggle} />}
-      </div>
+      </Space.Compact>
       <div className="action-strip" role="group" aria-label={t("侧栏操作")}>
         <div className="action-group">
-          <IconAction icon={<ReloadOutlined />} label={t("刷新")} onClick={refresh} disabled={working}>
-            <span className="wide-action-label">{t("刷新")}</span>
-          </IconAction>
-          <IconAction icon={<VideoCameraOutlined />} label={t("本地媒体")} aria-haspopup="dialog" disabled={!isReady || working}
-            onClick={() => { rememberFocus(settingsButton); setMediaTarget(target); }}>
-            <span className="wide-action-label">{t("本地媒体")}</span>
-          </IconAction>
+          <IconAction icon={<ReloadOutlined />} label={t("刷新")} onClick={refresh} disabled={working} />
           {!workbench && <IconAction icon={<ExportOutlined />} label={t("在新标签页打开")} onClick={() => void openWorkbench()} />}
           <IconAction icon={<SettingOutlined />} label={t("设置")} aria-haspopup="dialog" ref={settingsButton}
             onClick={() => { rememberFocus(settingsButton); setSettingsError(""); setSettings({ ...prefs }); }} />
@@ -520,69 +537,97 @@ export default function StorageBar() {
         </div>
       </div>
     </header>
-    <Tabs className="storage-tabs" size="small" tabBarGutter={16} activeKey={section} onChange={setSection}
-      destroyOnHidden items={sections.map(([key, label]) => ({ key, label: t(label),
-        disabled: !!draft && key !== section, children: key === section ? workspace : null }))} />
-    {editor && !inlineDraft && <WideModal title={editor.title} onCancel={editor.onCancel} footer={editor.footer}
-      closable={!working} keyboard={!working}>{editor.body}</WideModal>}
+    <div className="workspace-surface" id="storagebar-workspace">
+      {showMedia ? <section className="workspace workspace-media-content" aria-label={t("本地媒体")}>
+        {isReady ? <MediaBrowser key={target.key} target={target} refreshVersion={mediaRevision}
+          initialLocation={mediaLocation.current?.targetKey === target.key ? mediaLocation.current : null}
+          onLocationChange={(location) => { mediaLocation.current = { targetKey: target.key, ...location }; }} /> : targetStatus}
+      </section> : <Tabs className="storage-tabs" size="small" tabBarGutter={12} activeKey={section} onChange={setSection}
+        destroyOnHidden items={sections.map(([key, label]) => ({ key, label: t(label),
+          disabled: !!draft && key !== section, children: key === section ? workspace : null }))} />}
+    </div>
+    {editor && !inlineDraft && <WideModal className="record-detail-modal" size={editor.size}
+      title={editor.title} onCancel={editor.onCancel}
+      footer={<div className="detail-actions record-edit-actions">{editor.footer}</div>}
+      closable={!working} keyboard={!working}><div className="record-editor-scroll">{editor.body}</div></WideModal>}
     {transfer && <CookieTransfer mode={transfer.mode} target={transfer.target} stale={!isReady || transfer.target.key !== target.key}
       verify={verify} onClose={() => setTransfer(null)} onWrite={bump} selectedKeys={transfer.selectedKeys} />}
-    {mediaTarget && <MediaBrowser target={mediaTarget} stale={!isReady || mediaTarget.key !== target.key}
-      onClose={() => setMediaTarget(null)} />}
-    {confirm && <WideModal title={confirm.title} onCancel={() => setConfirm(null)}
+    {confirm && <WideModal size="sm" className="confirm-modal"
+      title={<span className="confirm-title"><ExclamationCircleFilled className="confirm-title-icon" aria-hidden="true" /><span>{confirm.title}</span></span>}
+      onCancel={() => setConfirm(null)}
       closable={!working} keyboard={!working} footer={[
         <Button key="cancel" disabled={working} onClick={() => setConfirm(null)}>{t("取消")}</Button>,
         <Button key="confirm" type="primary" danger loading={working} disabled={confirmStale}
           onClick={() => void runConfirmed()}>{working ? t("正在执行…") : confirm.label}</Button>,
       ]}>
-      <p className="modal-origin">{confirm.target.origin}</p>
-      <p className="confirm-scope">{confirm.scope}</p>
-      <p className="confirm-summary">{confirm.details}</p>
-      {confirmStale && <Alert className="form-alert" type="warning" title={t("目标已变化。请关闭确认框后重新选择操作。")} showIcon />}
-      {opError && <Alert className="form-alert" type="error" title={t(opError)} showIcon />}
+      <div className="dialog-stack">
+        <div className="modal-target-card">
+          <Typography.Text className="modal-target-origin">{confirm.target.origin}</Typography.Text>
+          <Typography.Text type="secondary" className="modal-target-scope">{confirm.scope}</Typography.Text>
+        </div>
+        <Typography.Paragraph className="confirm-summary">{confirm.details}</Typography.Paragraph>
+        {confirmStale && <Alert type="warning" title={t("目标已变化。请关闭确认框后重新选择操作。")} showIcon />}
+        {opError && <Alert type="error" title={t(opError)} showIcon />}
+      </div>
     </WideModal>}
-    {report && <WideModal title={report.title} onCancel={() => setReport(null)}
+    {report && <WideModal size="md" title={report.title} subtitle={report.target.origin} maskClosable
+      onCancel={() => setReport(null)}
       footer={<Button type="primary" onClick={() => setReport(null)}>{t("关闭")}</Button>}>
-      <p className="modal-origin">{report.target.origin}</p>
-      <Table className="compact-table" size="small" tableLayout="fixed" pagination={false} columns={outcomeColumns(t)}
-        rowKey="label" dataSource={report.categories ? categories.map(([key, label]) => ({ label, value: report.categories[key] }))
-          : [{ label: report.database ? "IndexedDB" : report.message, value: { rows: report.results } }]} />
+      <div className="metadata-card">
+        <Table className="compact-table" size="small" tableLayout="fixed" pagination={false} columns={outcomeColumns(t)}
+          rowKey="label" dataSource={report.categories ? categories.map(([key, label]) => ({ label, value: report.categories[key] }))
+            : [{ label: report.database ? "IndexedDB" : report.message, value: { rows: report.results } }]} />
+      </div>
     </WideModal>}
-    {settings && <WideModal title={t("设置")} onCancel={() => setSettings(null)} footer={[
-      <Button key="cancel" onClick={() => setSettings(null)}>{t("取消")}</Button>,
-      <Button key="save" type="primary" htmlType="submit" form="storagebar-settings">{t("保存")}</Button>,
-    ]}>
-      <form id="storagebar-settings" onSubmit={saveSettings}>
-        <div className="scope-fields">
-          <div className="form-field"><span>{t("主题")}</span>
-            <Select aria-label={t("主题")} value={settings.theme} options={[
-              { value: "system", label: t("跟随系统") }, { value: "light", label: t("浅色") }, { value: "dark", label: t("深色") },
-            ]} onChange={(value) => setSettings({ ...settings, theme: value })} />
+    {settings && <WideModal size="sm" className="settings-modal" title={t("设置")} maskClosable
+      onCancel={() => setSettings(null)} footer={[
+        <Button key="cancel" onClick={() => setSettings(null)}>{t("取消")}</Button>,
+        <Button key="save" type="primary" htmlType="submit" form="storagebar-settings">{t("保存")}</Button>,
+      ]}>
+      <form id="storagebar-settings" className="settings-form" onSubmit={saveSettings}>
+        <div className="settings-section">
+          <Typography.Text type="secondary" className="settings-section-title">{t("外观")}</Typography.Text>
+          <div className="scope-fields">
+            <div className="form-field"><span>{t("主题")}</span>
+              <Select aria-label={t("主题")} value={settings.theme} options={[
+                { value: "system", label: t("跟随系统") }, { value: "light", label: t("浅色") }, { value: "dark", label: t("深色") },
+              ]} onChange={(value) => setSettings({ ...settings, theme: value })} />
+            </div>
+            <div className="form-field"><span>{t("语言")}</span>
+              <Select aria-label={t("语言")} value={settings.language} options={[
+                { value: "system", label: t("跟随 Chrome") }, { value: "zh", label: t("简体中文") }, { value: "en", label: t("英文") },
+              ]} onChange={(value) => setSettings({ ...settings, language: value })} />
+            </div>
           </div>
-          <div className="form-field"><span>{t("语言")}</span>
-            <Select aria-label={t("语言")} value={settings.language} options={[
-              { value: "system", label: t("跟随 Chrome") }, { value: "zh", label: t("简体中文") }, { value: "en", label: t("英文") },
-            ]} onChange={(value) => setSettings({ ...settings, language: value })} />
+          <div className="scope-fields">
+            <div className="form-field"><span>{t("列表密度")}</span>
+              <Select aria-label={t("列表密度")} value={settings.density} options={[
+                { value: "compact", label: t("紧凑") }, { value: "comfortable", label: t("舒展") },
+              ]} onChange={(value) => setSettings({ ...settings, density: value })} />
+            </div>
+            <div className="form-field"><span>{t("数据字体")}</span>
+              <Select aria-label={t("数据字体")} value={settings.font}
+                options={[
+                  { value: "auto", label: t("自动") }, { value: "cascadia", label: "Cascadia Mono" },
+                  { value: "consolas", label: "Consolas" }, { value: "jetbrains", label: "JetBrains Mono" },
+                ]} onChange={(value) => setSettings({ ...settings, font: value })} />
+            </div>
           </div>
         </div>
-        <div className="form-field"><span>{t("打开时的默认分类")}</span>
-          <Select aria-label={t("打开时的默认分类")} value={settings.section}
-            options={sections.map(([value, label]) => ({ value, label }))} onChange={(value) => setSettings({ ...settings, section: value })} />
+        <div className="settings-section">
+          <Typography.Text type="secondary" className="settings-section-title">{t("行为")}</Typography.Text>
+          <div className="form-field"><span>{t("打开时的默认分类")}</span>
+            <Select aria-label={t("打开时的默认分类")} value={settings.section}
+              options={sections.map(([value, label]) => ({ value, label }))} onChange={(value) => setSettings({ ...settings, section: value })} />
+          </div>
+          <label className="settings-toggle-row">
+            <span className="settings-toggle-text">
+              <span>{t("自动刷新 Web Storage")}</span>
+            </span>
+            <Switch size="small" checked={settings.automatic} aria-label={t("自动刷新 Web Storage")}
+              onChange={(checked) => setSettings({ ...settings, automatic: checked })} />
+          </label>
         </div>
-        <div className="form-field"><span>{t("列表密度")}</span>
-          <Select aria-label={t("列表密度")} value={settings.density} options={[
-            { value: "compact", label: t("紧凑") }, { value: "comfortable", label: t("舒展") },
-          ]} onChange={(value) => setSettings({ ...settings, density: value })} />
-        </div>
-        <div className="form-field"><span>{t("数据字体")}</span>
-          <Select aria-label={t("数据字体")} value={settings.font}
-            options={[
-              { value: "auto", label: t("自动") }, { value: "cascadia", label: "Cascadia Mono" },
-              { value: "consolas", label: "Consolas" }, { value: "jetbrains", label: "JetBrains Mono" },
-            ]} onChange={(value) => setSettings({ ...settings, font: value })} />
-        </div>
-        <Checkbox checked={settings.automatic}
-          onChange={(event) => setSettings({ ...settings, automatic: event.target.checked })}>{t("自动刷新 Web Storage")}</Checkbox>
         {settingsError && <Alert className="form-alert" type="error" title={settingsError} showIcon />}
       </form>
     </WideModal>}
