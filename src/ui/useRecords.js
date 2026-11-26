@@ -98,8 +98,8 @@ export function useCatalog(target, section, revision, dbName, pendingNames) {
 }
 
 export function useRecordList(target, scope, revision, query, cursor, automatic, filter = null) {
-  const isStorage = scope.section === "storage";
-  const web = useWebStorage(target, scope.kind, revision, automatic, isStorage);
+  const isStorage = scope.section === "local" || scope.section === "session";
+  const web = useWebStorage(target, scope.section === "session" ? "session" : "local", revision, automatic, isStorage);
   const queryKey = scope.section === "idb" ? query.toLowerCase() : "";
   const canRead = scope.section === "cookies" || (scope.section === "cache" && scope.cacheName !== null) ||
     (scope.section === "idb" && scope.dbName !== null && scope.storeName !== null);

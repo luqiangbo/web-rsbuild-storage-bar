@@ -3,8 +3,8 @@ import { Modal } from "antd";
 
 const widths = {
   sm: "min(440px, calc(100vw - 20px))",
-  md: "min(560px, calc(100vw - 20px))",
-  lg: "min(780px, calc(100vw - 20px))",
+  md: "min(580px, calc(100vw - 20px))",
+  lg: "min(860px, calc(100vw - 24px))",
 };
 
 export default function WideModal({

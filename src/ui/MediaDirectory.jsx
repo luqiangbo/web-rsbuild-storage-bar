@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { FolderOutlined } from "@ant-design/icons";
+import {
+  CaretRightOutlined, ContainerOutlined, DatabaseOutlined, FolderOpenOutlined, FolderOutlined, HddOutlined, TableOutlined,
+} from "@ant-design/icons";
 import { Spin, Tree, Typography } from "antd";
 import { runInPage } from "../api/page.js";
 import { usePreferences } from "./preferences.js";
@@ -17,8 +19,23 @@ export async function readMediaFolders(target, kind, path, offset = 0) {
   return { rows: names.map((name) => ({ name, directory: true })), next: null };
 }
 
-function folderIcons() {
-  return <FolderOutlined />;
+function nodeIcon({ expanded, data }) {
+  const depth = data.folder.length;
+  if (data.source === "idb") {
+    if (depth === 0) return <DatabaseOutlined className="media-tree-root-icon" />;
+    if (depth === 1) return <DatabaseOutlined className="media-tree-folder-icon" />;
+    return <TableOutlined className="media-tree-leaf-icon" />;
+  }
+  if (data.source === "cache") {
+    if (depth === 0) return <HddOutlined className="media-tree-root-icon" />;
+    return <ContainerOutlined className="media-tree-leaf-icon" />;
+  }
+  const cls = depth === 0 ? "media-tree-root-icon" : "media-tree-folder-icon";
+  return expanded ? <FolderOpenOutlined className={cls} /> : <FolderOutlined className={cls} />;
+}
+
+function switcherIcon({ expanded }) {
+  return <CaretRightOutlined className={expanded ? "media-tree-arrow is-open" : "media-tree-arrow"} />;
 }
 
 export default function MediaDirectory({ target, kind, path, onNavigate }) {
@@ -26,6 +43,7 @@ export default function MediaDirectory({ target, kind, path, onNavigate }) {
   const [expanded, setExpanded] = useState(() => [directoryKey(kind, [])]);
   const [branches, setBranches] = useState(new Map());
   const currentBranches = useRef(new Map());
+  const collapsedByUser = useRef(null);
   const enabled = useRef(false);
   useEffect(() => {
     enabled.current = true;
@@ -54,9 +72,16 @@ export default function MediaDirectory({ target, kind, path, onNavigate }) {
   }, [target]);
 
   useEffect(() => {
+    const skipped = collapsedByUser.current;
+    collapsedByUser.current = null;
     const folders = [[], ...path.map((_, index) => path.slice(0, index + 1))].filter((item) => isMediaContainer(kind, item));
-    setExpanded((keys) => [...new Set([...keys, ...folders.map((folder) => directoryKey(kind, folder))])]);
-    for (const folder of folders) void load(kind, folder);
+    const keysToExpand = folders.map((folder) => directoryKey(kind, folder)).filter((key) => key !== skipped);
+    if (keysToExpand.length) {
+      setExpanded((keys) => [...new Set([...keys, ...keysToExpand])]);
+    }
+    for (const folder of folders) {
+      if (directoryKey(kind, folder) !== skipped) void load(kind, folder);
+    }
   }, [path, kind, load]);
 
   function node(source, folder, title) {
@@ -74,21 +99,41 @@ export default function MediaDirectory({ target, kind, path, onNavigate }) {
         </Typography.Text>,
       });
     }
+    const isRoot = folder.length === 0;
     return {
-      key, title: <span className="media-tree-label" title={title}>{title}</span>, source, folder, children, icon: folderIcons,
+      key,
+      title: <span className={`media-tree-label${isRoot ? " is-root" : ""}`} title={title}>{title}</span>,
+      source,
+      folder,
+      children,
+      icon: nodeIcon,
       isLeaf: !isMediaContainer(source, folder) || !!(branch?.ready && !children.length),
     };
   }
 
-  return <Tree.DirectoryTree className="media-dir-tree" aria-label={t("目录")} blockNode expandAction={false}
-    treeData={Object.entries(mediaRoots).map(([source, title]) => node(source, [], title))}
-    expandedKeys={expanded} selectedKeys={[directoryKey(kind, path)]}
-    onExpand={(keys, { expanded: open, node: item }) => {
-      setExpanded(keys);
-      if (open) void load(item.source, item.folder);
-    }}
-    onSelect={(_, { node: item }) => {
-      if (item.key.startsWith("more:")) void load(item.source, item.folder, item.append);
-      else onNavigate(item.source, item.folder);
-    }} />;
+  const activeKey = directoryKey(kind, path);
+
+  return <div className="media-tree-groups">
+    {Object.entries(mediaRoots).map(([source, title]) => {
+      const prefix = `["${source}"`;
+      const groupExpanded = expanded.filter((key) => key.startsWith(prefix));
+      const groupSelected = source === kind ? [activeKey] : [];
+      return <section key={source} className="media-tree-group" data-source={source} aria-label={title}>
+        <Tree.DirectoryTree className="media-dir-tree" aria-label={title} blockNode expandAction="click"
+          switcherIcon={switcherIcon}
+          treeData={[node(source, [], title)]}
+          expandedKeys={groupExpanded}
+          selectedKeys={groupSelected}
+          onExpand={(keys, { expanded: open, node: item }) => {
+            collapsedByUser.current = open ? null : item.key;
+            setExpanded((all) => [...all.filter((key) => !key.startsWith(prefix)), ...keys]);
+            if (open) void load(item.source, item.folder);
+          }}
+          onSelect={(_, { node: item }) => {
+            if (item.key.startsWith("more:")) void load(item.source, item.folder, item.append);
+            else onNavigate(item.source, item.folder);
+          }} />
+      </section>;
+    })}
+  </div>;
 }

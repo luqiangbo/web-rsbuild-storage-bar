@@ -1,15 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppstoreOutlined, ArrowLeftOutlined, AudioOutlined, CloseOutlined, CopyOutlined, DownloadOutlined,
-  ExportOutlined, FileOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PictureOutlined,
-  PlayCircleOutlined, RightOutlined, SearchOutlined, UnorderedListOutlined, VideoCameraOutlined,
+  FileOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PictureOutlined, PlayCircleOutlined,
+  RightOutlined, SearchOutlined, UnorderedListOutlined, VideoCameraOutlined, ZoomInOutlined, ZoomOutOutlined,
 } from "@ant-design/icons";
 import { Alert, Breadcrumb, Button, Input, Progress, Segmented, Spin, Table, Tag, Tooltip, Typography } from "antd";
 import { runInPage } from "../api/page.js";
 import IconAction from "./IconAction.jsx";
 import JsonViewer from "./JsonViewer.jsx";
 import { jsonError } from "./jsonDocument.js";
-import { openPreviewWindow } from "./openPreviewWindow.js";
 import { usePreferences } from "./preferences.js";
 import { useRead } from "./useRecords.js";
 import useFeedback from "./useFeedback.jsx";
@@ -19,6 +18,9 @@ import MediaThumbnail, { createThumbnailQueue } from "./MediaThumbnail.jsx";
 import { autoPreviewLimit, mediaLimit, readMediaBlob } from "./mediaTransfer.js";
 
 const textPreviewLimit = 2 * 1024 * 1024;
+const minZoom = 0.25;
+const maxZoom = 5;
+const clampZoom = (value) => Math.min(maxZoom, Math.max(minZoom, Math.round(value * 100) / 100));
 const errorText = (error) => error?.message || String(error);
 const sizeText = (bytes, t) => {
   if (bytes == null) return t("大小未知");
@@ -58,35 +60,86 @@ function safeFileName(name, mime) {
   return sub ? `${base}.${sub === "jpeg" ? "jpg" : sub === "plain" ? "txt" : sub}` : base;
 }
 
-export function MediaPreview({ target, source, autoRead = false, onClose, onPrev, onNext, positionText }) {
+export function MediaPreview({ target, source, autoRead = false, onClose, onPrev, onNext, positionText, cache }) {
   const { t, language } = usePreferences();
   const notify = useFeedback();
   const sourceCategory = mediaType(source.type);
   const rawOnly = !sourceCategory && source.kind === "opfs";
   const shouldAutoRead = autoRead && !rawOnly && !(sourceCategory === "text" && source.size > textPreviewLimit);
-  const [state, setState] = useState(() => shouldAutoRead ? { status: "loading", bytes: 0 } : { status: "idle" });
-  const transfer = useRef(null);
   const sourceKey = JSON.stringify([target.documentId, source]);
   const unavailable = source.error || (source.size === 0 ? "文件为空，无法预览"
     : source.size > mediaLimit ? "文件超过 50 MiB 的预览上限" : "");
   const embedded = !onClose;
 
+  const [state, setState] = useState(() => {
+    const cached = cache?.get(sourceKey);
+    if (cached) return { status: "ready", ...cached };
+    return shouldAutoRead && !unavailable ? { status: "loading", bytes: 0 } : { status: "idle" };
+  });
+  const [switching, setSwitching] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragOrigin = useRef(null);
+  const transfer = useRef(null);
+  const ownedUrls = useRef(new Set());
+  const stageRef = useRef(null);
+
+  const revokeIfOwned = useCallback((url) => {
+    if (!url || !ownedUrls.current.has(url)) return;
+    ownedUrls.current.delete(url);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  useEffect(() => () => {
+    transfer.current?.controller.abort();
+    transfer.current = null;
+    for (const url of ownedUrls.current) URL.revokeObjectURL(url);
+    ownedUrls.current.clear();
+  }, []);
+
   useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setDragging(false);
+    const cached = cache?.get(sourceKey);
+    if (cached && !unavailable) {
+      transfer.current?.controller.abort();
+      transfer.current = null;
+      setSwitching(false);
+      setState({ status: "ready", ...cached });
+      return;
+    }
     if (shouldAutoRead && !unavailable) {
-      void play(sourceCategory === "text" ? textPreviewLimit : autoPreviewLimit);
+      void play(sourceCategory === "text" ? textPreviewLimit : autoPreviewLimit, { keepPrevious: true });
     } else {
+      transfer.current?.controller.abort();
+      transfer.current = null;
+      setSwitching(false);
       setState({ status: "idle" });
     }
-    return () => release();
   }, [sourceKey, shouldAutoRead, unavailable, sourceCategory]);
 
-  function release() {
-    const job = transfer.current;
-    if (!job) return;
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || state.status !== "ready" || mediaType(state.type || source.type) !== "image") return;
+    const onWheel = (event) => {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.18 : 1 / 1.18;
+      setZoom((current) => {
+        const next = clampZoom(current * factor);
+        if (next <= 1) setPan({ x: 0, y: 0 });
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [state.status, state.type, source.type]);
+
+  function abortCurrent() {
+    if (!transfer.current) return;
+    transfer.current.controller.abort();
     transfer.current = null;
-    job.controller.abort();
-    if (job.url) URL.revokeObjectURL(job.url);
-    job.closeWindow?.();
   }
 
   function triggerDownload(url, mime) {
@@ -99,59 +152,75 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
     notify(t("媒体文件已交给浏览器下载"));
   }
 
-  async function play(limit = mediaLimit, { raw = false, save = false } = {}) {
-    release();
-    const job = { controller: new AbortController() };
+  async function play(limit = mediaLimit, { raw = false, save = false, keepPrevious = false } = {}) {
+    abortCurrent();
+    const job = { controller: new AbortController(), key: sourceKey };
     transfer.current = job;
-    setState({ status: "loading", bytes: 0, total: null });
+    const preserveImage = keepPrevious && !raw && !save && sourceCategory === "image" &&
+      state.status === "ready" && mediaType(state.type) === "image";
+    if (preserveImage) {
+      setSwitching(true);
+    } else {
+      setSwitching(false);
+      setState({ status: "loading", bytes: 0, total: null });
+    }
     try {
       const requestSource = raw ? { ...source, raw: true } : source;
       const blob = await readMediaBlob(target, requestSource, {
         signal: job.controller.signal, limit,
-        onProgress: (bytes, total) => setState({ status: "loading", bytes, total }),
+        onProgress: (bytes, total) => {
+          if (!preserveImage && transfer.current === job) setState({ status: "loading", bytes, total });
+        },
       });
       if (transfer.current !== job) return;
-      if (!blob) { setState({ status: "idle" }); return; }
-      job.blob = blob;
-      job.url = URL.createObjectURL(blob);
+      if (!blob) {
+        setSwitching(false);
+        setState({ status: "idle" });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const nextCategory = mediaType(blob.type || source.type);
       if (save) {
-        triggerDownload(job.url, blob.type || source.type);
+        triggerDownload(url, blob.type || source.type);
         if (raw) {
+          URL.revokeObjectURL(url);
+          setSwitching(false);
           setState({ status: "idle" });
           return;
         }
       }
-      const nextCategory = mediaType(blob.type || source.type);
+      let entry = { url, type: blob.type || source.type };
       if (nextCategory === "text") {
         const text = await blob.text();
-        if (transfer.current !== job) return;
-        setState({ status: "ready", url: job.url, type: blob.type || source.type, text });
-      } else {
-        setState({ status: "ready", url: job.url, type: blob.type });
+        if (transfer.current !== job) { URL.revokeObjectURL(url); return; }
+        entry = { ...entry, text };
+      } else if (nextCategory === "image") {
+        const probe = new Image();
+        probe.src = url;
+        await probe.decode().catch(() => {});
+        if (transfer.current !== job) { URL.revokeObjectURL(url); return; }
       }
+      if (cache && blob.size <= autoPreviewLimit) {
+        cache.set(sourceKey, entry);
+      } else {
+        ownedUrls.current.add(url);
+      }
+      setSwitching(false);
+      setState((previous) => {
+        if (previous.url && previous.url !== url) revokeIfOwned(previous.url);
+        return { status: "ready", ...entry };
+      });
     } catch (error) {
-      if (transfer.current === job) setState({ status: "error", error: errorText(error) });
-    }
-  }
-
-  function popout() {
-    const job = transfer.current;
-    if (!job?.blob) return;
-    try {
-      job.closeWindow?.();
-      job.closeWindow = state.text !== undefined
-        ? openPreviewWindow({ text: state.text, name: source.name })
-        : openPreviewWindow({ blob: job.blob, name: source.name });
-      setState((current) => ({ ...current, windowError: "" }));
-    } catch (error) {
-      setState((current) => ({ ...current, windowError: errorText(error) }));
+      if (transfer.current === job) {
+        setSwitching(false);
+        setState({ status: "error", error: errorText(error) });
+      }
     }
   }
 
   function download() {
-    const job = transfer.current;
-    if (job?.url) {
-      triggerDownload(job.url, job.blob?.type || source.type);
+    if (state.status === "ready" && state.url) {
+      triggerDownload(state.url, state.type || source.type);
       return;
     }
     void play(mediaLimit, { raw: rawOnly, save: true });
@@ -167,6 +236,38 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
     }
   }
 
+  function stepZoom(delta) {
+    setZoom((current) => {
+      const next = clampZoom(current + delta);
+      if (next <= 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }
+
+  function resetZoom() {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }
+
+  function startDrag(event) {
+    if (zoom <= 1 || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragging(true);
+    dragOrigin.current = { x: event.clientX - pan.x, y: event.clientY - pan.y };
+  }
+
+  function moveDrag(event) {
+    if (!dragging || !dragOrigin.current) return;
+    setPan({ x: event.clientX - dragOrigin.current.x, y: event.clientY - dragOrigin.current.y });
+  }
+
+  function endDrag() {
+    if (!dragging) return;
+    setDragging(false);
+    dragOrigin.current = null;
+  }
+
   const category = mediaType(state.type || source.type);
   const Icon = mediaIcons[category] ?? FileOutlined;
   const label = source.name || t(mediaLabels[category] ?? "本地媒体");
@@ -174,16 +275,27 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
     ? { ...current, playbackError: "Chrome 无法解码此文件，或文件不完整。" } : current);
   const Player = category === "audio" ? "audio" : "video";
   const isTextReady = state.status === "ready" && category === "text" && state.text !== undefined;
+  const isImageReady = state.status === "ready" && category === "image" && !state.playbackError;
   const isJsonText = useMemo(() => isTextReady && !jsonError(state.text), [isTextReady, state.text]);
   const stageClass = [
     "media-stage",
-    state.status === "ready" && category === "image" && "media-stage-image",
+    isImageReady && "media-stage-image",
+    isImageReady && zoom > 1 && "is-zoomed",
+    dragging && "is-dragging",
     state.status === "ready" && category === "audio" && "media-stage-audio",
     isTextReady && "media-stage-text",
   ].filter(Boolean).join(" ");
 
   return <div className={`media-preview${embedded ? " media-preview-embedded" : ""}`}>
-    <div className={stageClass}>
+    <div ref={stageRef} className={stageClass}
+      onPointerDown={isImageReady ? startDrag : undefined}
+      onPointerMove={isImageReady ? moveDrag : undefined}
+      onPointerUp={isImageReady ? endDrag : undefined}
+      onPointerCancel={isImageReady ? endDrag : undefined}
+      onDoubleClick={isImageReady ? () => {
+        if (zoom !== 1) resetZoom();
+        else setZoom(2);
+      } : undefined}>
       {unavailable ? <div className="media-stage-placeholder">
         <Icon className="media-stage-icon" />
         <Typography.Text type="secondary">{t(unavailable)}</Typography.Text>
@@ -192,17 +304,20 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
         {state.total ? <Progress className="media-stage-progress" percent={Math.min(99, Math.floor(state.bytes / state.total * 100))} size="small" />
           : <Typography.Text role="status" type="secondary">{state.bytes > 0
             ? t("已读取 {size}", { size: sizeText(state.bytes, t) }) : t("正在读取…")}</Typography.Text>}
-        <Button size="small" onClick={() => { release(); setState({ status: "idle" }); }}>{t("取消读取")}</Button>
+        <Button size="small" onClick={() => { abortCurrent(); setState({ status: "idle" }); }}>{t("取消读取")}</Button>
       </div> : isTextReady ? <div className="media-text-stage">
         {isJsonText ? <JsonViewer text={state.text} />
           : <pre className="value-block media-text-content">{state.text === "" ? <Typography.Text type="secondary">{t("（空字符串）")}</Typography.Text> : state.text}</pre>}
       </div> : state.status === "ready" ? <>
-        {category === "image" ? <img src={state.url} alt={label} onError={decodeError} />
+        {category === "image" ? <img className={`media-stage-img${switching ? " is-switching" : ""}`}
+          src={state.url} alt={label} draggable={false} onError={decodeError}
+          style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }} />
           : category === "audio" ? <div className="media-audio-stage">
             <AudioOutlined className="media-audio-glyph" aria-hidden="true" />
             <Player src={state.url} controls preload="metadata" aria-label={label} onError={decodeError} />
           </div>
             : <Player src={state.url} controls playsInline preload="metadata" aria-label={label} onError={decodeError} />}
+        {switching && <span className="media-stage-busy" aria-label={t("正在读取…")}><Spin size="small" /></span>}
       </> : rawOnly ? <div className="media-stage-placeholder">
         <Icon className="media-stage-icon" />
         {state.error && <Alert type="error" showIcon title={t(state.error)} />}
@@ -221,7 +336,7 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
         </div>
       </div>}
     </div>
-    {(state.playbackError || state.windowError) && <Alert type="error" showIcon title={t(state.playbackError || state.windowError)} />}
+    {state.playbackError && <Alert type="error" showIcon title={t(state.playbackError)} />}
     <div className="media-preview-bar">
       <div className="media-preview-info">
         {embedded && source.name && <Typography.Text strong className="cell-text data-input" title={source.name}>{source.name}</Typography.Text>}
@@ -234,6 +349,15 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
         </div>
       </div>
       <div className="action-strip media-preview-actions">
+        {isImageReady && <div className="action-group">
+          <IconAction icon={<ZoomOutOutlined />} label={t("缩小")} disabled={zoom <= minZoom} onClick={() => stepZoom(-0.25)} />
+          <Tooltip title={t("重置缩放")}>
+            <Button type="text" size="small" className="media-zoom-reset" onClick={resetZoom}>
+              {Math.round(zoom * 100)}%
+            </Button>
+          </Tooltip>
+          <IconAction icon={<ZoomInOutlined />} label={t("放大")} disabled={zoom >= maxZoom} onClick={() => stepZoom(0.25)} />
+        </div>}
         {(onPrev || onNext) && <div className="action-group">
           <IconAction icon={<LeftOutlined />} label={t("上一项")} disabled={!onPrev} onClick={onPrev} />
           {positionText && <Typography.Text type="secondary" className="media-position-text">{positionText}</Typography.Text>}
@@ -242,10 +366,12 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
         {(state.status === "ready" || (rawOnly && !unavailable && state.status !== "loading")) && <div className="action-group">
           {isTextReady && <IconAction icon={<CopyOutlined />} label={t("复制值")} onClick={() => void copyText()} />}
           <IconAction icon={<DownloadOutlined />} label={t("下载文件")} onClick={download} />
-          {state.status === "ready" && <IconAction icon={<ExportOutlined />} label={t("在独立窗口预览")}
-            disabled={!!state.playbackError} onClick={popout} />}
           {embedded && state.status === "ready" && <IconAction icon={<CloseOutlined />} label={t("关闭预览")}
-            onClick={() => { release(); setState({ status: "idle" }); }} />}
+            onClick={() => {
+              abortCurrent();
+              revokeIfOwned(state.url);
+              setState({ status: "idle" });
+            }} />}
         </div>}
       </div>
     </div>
@@ -253,6 +379,38 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
 }
 
 const sources = Object.entries(mediaRoots).map(([value, label]) => ({ value, label }));
+
+function createPreviewCache(limit = 12) {
+  const map = new Map();
+  return {
+    get(key) {
+      if (!map.has(key)) return null;
+      const value = map.get(key);
+      map.delete(key);
+      map.set(key, value);
+      return value;
+    },
+    set(key, value) {
+      if (map.has(key)) {
+        const old = map.get(key);
+        if (old?.url && old.url !== value.url) URL.revokeObjectURL(old.url);
+        map.delete(key);
+      }
+      map.set(key, value);
+      while (map.size > limit) {
+        const [oldestKey, oldest] = map.entries().next().value;
+        map.delete(oldestKey);
+        if (oldest?.url) URL.revokeObjectURL(oldest.url);
+      }
+    },
+    clear() {
+      for (const entry of map.values()) {
+        if (entry?.url) URL.revokeObjectURL(entry.url);
+      }
+      map.clear();
+    },
+  };
+}
 
 export default function MediaBrowser({ target, refreshVersion, initialLocation, onLocationChange }) {
   const { t, language } = usePreferences();
@@ -268,8 +426,11 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
   const [width, setWidth] = useState(null);
   const [layout, setLayout] = useState(null);
   const scrollRef = useRef(null);
+  const previewCache = useMemo(() => createPreviewCache(12), [target.key]);
   const showTree = width >= 640;
   const splitPreview = width >= 960;
+
+  useEffect(() => () => previewCache.clear(), [previewCache]);
 
   useLayoutEffect(() => {
     if (!layout) return;
@@ -375,6 +536,7 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }
   function refresh() {
+    previewCache.clear();
     reset();
     setRevision((value) => value + 1);
   }
@@ -464,10 +626,10 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
   ];
 
   const previewElement = selectedSource && <MediaPreview
-    key={JSON.stringify([scope, rowKey(selected)])}
     target={target}
     source={selectedSource}
     autoRead={selected.size > 0 && selected.size <= autoPreviewLimit}
+    cache={previewCache}
     onClose={() => setSelectedId(null)}
     onPrev={selectedIndex > 0 ? () => setSelectedId(rowKey(openableFiles[selectedIndex - 1])) : undefined}
     onNext={selectedIndex >= 0 && selectedIndex < openableFiles.length - 1 ? () => setSelectedId(rowKey(openableFiles[selectedIndex + 1])) : undefined}

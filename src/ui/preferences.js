@@ -5,13 +5,19 @@ import { dataFonts } from "../../public/data-fonts.js";
 export const preferenceKey = "storagebar.preferences";
 const systemLanguage = () => (globalThis.chrome?.i18n?.getUILanguage() || navigator.language).toLowerCase().startsWith("zh") ? "zh" : "en";
 const colorQuery = "(prefers-color-scheme: dark)";
-const defaults = { section: "idb", density: "compact", automatic: true, theme: "system", language: "system", font: "auto" };
+const defaults = { section: "cookies", density: "compact", automatic: true, theme: "system", language: "system", font: "auto" };
+const validSections = ["cookies", "local", "session", "idb", "cache"];
+
+function normalizeSection(section) {
+  if (section === "storage") return "local";
+  return validSections.includes(section) ? section : defaults.section;
+}
 
 function readPreferences() {
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) || "{}");
     return {
-      section: ["idb", "cookies", "storage", "cache"].includes(saved.section) ? saved.section : defaults.section,
+      section: normalizeSection(saved.section),
       density: saved.density === "comfortable" ? saved.density : defaults.density,
       automatic: typeof saved.automatic === "boolean" ? saved.automatic : defaults.automatic,
       theme: ["light", "dark"].includes(saved.theme) ? saved.theme : defaults.theme,

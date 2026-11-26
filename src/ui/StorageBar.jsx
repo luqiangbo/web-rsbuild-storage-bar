@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  DatabaseOutlined, DeleteOutlined, ExclamationCircleFilled, ExportOutlined, LockOutlined, ReloadOutlined, SettingOutlined, UnlockOutlined, VideoCameraOutlined,
+  DatabaseOutlined, DeleteOutlined, ExclamationCircleFilled, ExportOutlined,
+  LockOutlined, ReloadOutlined, RollbackOutlined, SettingOutlined, UnlockOutlined, VideoCameraOutlined,
 } from "@ant-design/icons";
 import { Alert, App, Badge, Button, Checkbox, DatePicker, Input, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
@@ -19,8 +20,13 @@ import WideModal from "./WideModal.jsx";
 import useFeedback from "./useFeedback.jsx";
 
 const sections = [
-  ["cookies", "Cookies"], ["storage", "Storage"], ["idb", "IndexedDB"], ["cache", "Cache"],
+  ["cookies", "Cookies", "Cookies"],
+  ["local", "LocalStorage", "Local"],
+  ["session", "SessionStorage", "Session"],
+  ["idb", "IndexedDB", "IDB"],
+  ["cache", "Cache", "Cache"],
 ];
+const isWebStorage = (section) => section === "local" || section === "session";
 const categories = [
   ["idb", "IndexedDB"], ["cookies", "Cookies"], ["local", "LocalStorage"],
   ["session", "SessionStorage"], ["cache", "Cache Storage"],
@@ -38,7 +44,11 @@ const route = new URLSearchParams(location.search);
 const workbench = route.get("view") === "workspace";
 const sourceTab = route.get("target");
 const initialTabId = workbench && /^\d+$/.test(sourceTab ?? "") && Number.isSafeInteger(Number(sourceTab)) ? Number(sourceTab) : null;
-const initialSection = workbench && sections.some(([key]) => key === route.get("section")) ? route.get("section") : null;
+const rawRouteSection = route.get("section");
+const resolvedRouteSection = rawRouteSection === "storage"
+  ? (route.get("kind") === "session" ? "session" : "local")
+  : rawRouteSection;
+const initialSection = workbench && sections.some(([key]) => key === resolvedRouteSection) ? resolvedRouteSection : null;
 const draftFields = ({ key, value, expiration, cookie }) => JSON.stringify([key, value, expiration, cookie]);
 
 function expirationInput(cookie) {
@@ -84,33 +94,60 @@ function Editor({ draft, setDraft, working, stale, savingError, save }) {
   const { section } = scope;
   const editing = !!row;
   const cookie = draft.cookie;
-  const needsKey = section === "storage" || (section === "idb" && !editing && store.keyPath === null);
-  const renderKey = section === "storage" || section === "cookies" || needsKey;
+  const webStorage = isWebStorage(section);
+  const needsKey = webStorage || (section === "idb" && !editing && store.keyPath === null);
+  const renderKey = webStorage || section === "cookies" || needsKey;
   const set = (name, value) => setDraft((current) => ({ ...current, [name]: value }));
   const setJsonValue = useCallback((value) => setDraft((current) => ({ ...current, value })), [setDraft]);
   const setCookie = (name, value) => setDraft((current) => ({
     ...current, cookie: { ...current.cookie, [name]: value },
   }));
+  const onFormKeyDown = (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      if (!stale && !working) void save();
+    }
+  };
   const idbMeta = section === "idb" && !needsKey ? (editing
     ? t("主键 {key}", { key: row.title })
     : t(store.autoIncrement ? "键路径 {path} · 自动生成" : "键路径 {path}", { path: JSON.stringify(store.keyPath) })) : null;
+  const keyLabel = section === "cookies" ? t("Cookie 名称") : section === "idb" ? t(store.autoIncrement ? "主键 (JSON)，可留空" : "主键 (JSON)") : t("键名");
+  const inlineKeyInput = !cookie && renderKey ? (
+    <Input size="small" className="data-input editor-key-input" aria-label={keyLabel}
+      prefix={<span className="editor-key-prefix">{section === "idb" ? t("主键") : t("键名")}</span>}
+      placeholder={section === "idb" ? t("字符串主键需要双引号，例如 \"user-1\"。") : t("键名")}
+      value={draft.key} readOnly={stale || working} spellCheck={false}
+      onChange={(event) => set("key", event.target.value)} />
+  ) : null;
+  const textDirty = draft.value !== draft.initialValue;
   return <form id={editorForm} className={`record-editor-form${cookie ? " is-cookie-form" : ""}`}
+    onKeyDown={onFormKeyDown}
     onSubmit={(event) => { event.preventDefault(); if (!stale && !working) void save(); }}>
       {stale && <Alert className="form-alert" type="warning" title={t("目标已变化。可复制此草稿，保存已停用。")} showIcon />}
       {savingError && <Alert className="form-alert" type="error" title={t(savingError)} showIcon />}
-      {renderKey && <label className="form-field">
-        <span>{section === "cookies" ? t("Cookie 名称") : section === "idb" ? t(store.autoIncrement ? "主键 (JSON)，可留空" : "主键 (JSON)") : t("键名")}</span>
-        <Input className="data-input" value={draft.key} readOnly={(section === "cookies" && editing) || stale || working}
+      {cookie && renderKey && <label className="form-field">
+        <span>{keyLabel}</span>
+        <Input className="data-input" value={draft.key} readOnly={editing || stale || working}
           spellCheck={false} onChange={(event) => set("key", event.target.value)} />
-        {section === "idb" && <small>{t("字符串主键需要双引号，例如 \"user-1\"。")}</small>}
       </label>}
       {draft.json ? <div className="form-field form-field-grow">
-        <JsonEditor value={draft.value} original={draft.initialValue} readOnly={stale || working} onChange={setJsonValue} meta={idbMeta} />
-      </div> : <label className={`form-field${cookie ? "" : " form-field-grow"}`}>
-        <span>{idbMeta || t("值")}</span>
-        <Input.TextArea className={`data-input${cookie ? "" : " record-textarea"}`} rows={cookie ? 4 : 6} value={draft.value} readOnly={stale || working}
-          spellCheck={false} onChange={(event) => set("value", event.target.value)} />
-      </label>}
+        <JsonEditor value={draft.value} original={draft.initialValue} readOnly={stale || working}
+          onChange={setJsonValue} meta={idbMeta} leading={inlineKeyInput} />
+      </div> : <>
+        {!cookie && (inlineKeyInput || textDirty || idbMeta) && <div className="json-editor-bar">
+          {inlineKeyInput ? <div className="json-editor-leading">{inlineKeyInput}</div>
+            : <Typography.Text type="secondary" className="cell-text json-editor-meta">{idbMeta || t("值")}</Typography.Text>}
+          {!stale && !working && textDirty && <div className="action-strip json-editor-actions" role="group" aria-label={t("编辑器操作")}>
+            <IconAction icon={<RollbackOutlined />} label={t("还原修改")} onClick={() => set("value", draft.initialValue)} />
+          </div>}
+        </div>}
+        <label className={`form-field${cookie ? "" : " form-field-grow"}`}>
+          {cookie && <span>{t("值")}</span>}
+          <Input.TextArea className={`data-input${cookie ? "" : " record-textarea"}`} aria-label={t("值")}
+            rows={cookie ? 4 : 6} value={draft.value} readOnly={stale || working}
+            spellCheck={false} onChange={(event) => set("value", event.target.value)} />
+        </label>
+      </>}
       {cookie && <>
         <div className="scope-fields">
           <label className="form-field"><span>{t("域名")}</span>
@@ -157,7 +194,6 @@ export default function StorageBar() {
   const { modal } = App.useApp();
   const [area, setArea] = useState(workbench && route.get("area") === "media" ? "media" : "storage");
   const [section, setSection] = useState(initialSection ?? prefs.section);
-  const [kind, setKind] = useState(workbench && route.get("kind") === "session" ? "session" : "local");
   const [revision, setRevision] = useState(0);
   const [mediaRevision, setMediaRevision] = useState(0);
   const [settings, setSettings] = useState(null);
@@ -202,12 +238,11 @@ export default function StorageBar() {
     if (area === "media") url.searchParams.set("area", "media");
     else url.searchParams.delete("area");
     url.searchParams.set("section", section);
-    if (section === "storage") url.searchParams.set("kind", kind);
-    else url.searchParams.delete("kind");
+    url.searchParams.delete("kind");
     if (target.tabId == null) url.searchParams.delete("target");
     else url.searchParams.set("target", String(target.tabId));
     history.replaceState(null, "", url);
-  }, [target.status, target.tabId, area, section, kind]);
+  }, [target.status, target.tabId, area, section]);
   const currentPending = pending && pending.target.key === target.key ? pending : null;
   const pendingNames = new Set(currentPending?.names);
   const bump = () => setRevision((value) => value + 1);
@@ -309,6 +344,7 @@ export default function StorageBar() {
   }
   function showEditor(action) {
     const { scope, row, detail } = action;
+    const webStorage = isWebStorage(scope.section);
     const value = scope.section === "idb" ? detail ? JSON.stringify(JSON.parse(detail.text), null, 2) : "{}"
       : row?.cookie?.value ?? row?.value ?? "";
     if (!action.fromDetail) rememberFocus(action.focus);
@@ -317,10 +353,10 @@ export default function StorageBar() {
       domain: action.target.hostname, path: "/", hostOnly: true, secure: action.target.protocol === "https:",
       httpOnly: false, sameSite: "unspecified",
     } : null;
-    const next = { ...action, cookie, key: cookie?.name ?? (scope.section === "storage" ? row?.id ?? "" : ""),
+    const next = { ...action, cookie, key: cookie?.name ?? (webStorage ? row?.id ?? "" : ""),
       value, expiration: expirationInput(row?.cookie) };
     setDraft({ ...next, original: draftFields(next), initialValue: value,
-      json: scope.section === "idb" || (scope.section === "storage" && !!row && !jsonError(value)) });
+      json: scope.section === "idb" || (webStorage && !!row && !jsonError(value)) });
   }
   const verify = useCallback(async (captured) => {
     await targetControl.verifySelection(captured);
@@ -346,8 +382,8 @@ export default function StorageBar() {
   async function saveEditor() {
     const { target: captured, scope, row, value, key, store, detail, expiration, cookie } = draft;
     await mutate(captured, async (verify) => {
-      if (scope.section === "storage") {
-        await runInPage(captured, "storageSave", { kind: scope.kind, key, value, ...(row ? { originalKey: row.id, original: row.value } : {}) });
+      if (isWebStorage(scope.section)) {
+        await runInPage(captured, "storageSave", { kind: scope.section, key, value, ...(row ? { originalKey: row.id, original: row.value } : {}) });
       } else if (scope.section === "cookies") {
         const unchangedExpiration = row && expiration === expirationInput(row.cookie);
         const seconds = unchangedExpiration ? row.cookie.expirationDate
@@ -434,8 +470,7 @@ export default function StorageBar() {
   const currentTab = tabOptions.find(({ value }) => value === target.tabId);
   const targetOrigin = target.origin || currentTab?.origin;
   const draftStale = draft && (!isReady || draft.target.key !== target.key);
-  const inlineDraft = draft?.fromDetail && !draftStale && draft.scope.section === section &&
-    (section !== "storage" || draft.scope.kind === kind);
+  const inlineDraft = draft?.fromDetail && !draftStale && draft.scope.section === section;
   const closeEditor = () => {
     if (working) return;
     if (draftFields(draft) === draft.original) { setDraft(null); return; }
@@ -450,22 +485,28 @@ export default function StorageBar() {
     url.searchParams.set("view", "workspace");
     if (area === "media") url.searchParams.set("area", "media");
     url.searchParams.set("section", section);
-    if (section === "storage") url.searchParams.set("kind", kind);
     if (target.tabId != null && target.origin) url.searchParams.set("target", String(target.tabId));
     try { await chrome.tabs.create({ url: url.href }); }
     catch (error) { notify(t("无法打开独立标签页：{error}", { error: errorText(error) }), "error"); }
   }
+  const draftDirty = !!draft && draftFields(draft) !== draft.original;
   const editor = draft && {
     title: draft.row ? t("编辑记录") : draft.cookie ? t("新增 Cookie") : t("新增记录"),
     size: draft.json ? "lg" : "md",
     body: <Editor draft={draft} setDraft={setDraft} working={working} stale={draftStale} savingError={opError} save={saveEditor} />,
-    footer: [
-      <Button key="cancel" disabled={working} onClick={closeEditor}>{t("取消")}</Button>,
-      draftStale ? <Button key="copy" onClick={() => copy(draft.value)}>{t("复制草稿")}</Button>
-        : <Button key="save" form={editorForm} htmlType="submit" type="primary" loading={working}>
-          {working ? t("正在保存…") : t("保存更改")}
-        </Button>,
-    ],
+    footer: <>
+      <span className="editor-footer-hint">
+        {draftDirty ? <><span className="editor-dirty-dot" aria-hidden="true" /><span>{t("已修改")}</span></>
+          : !draftStale && <span>Ctrl+S {t("保存")}</span>}
+      </span>
+      <div className="detail-actions">
+        <Button key="cancel" disabled={working} onClick={closeEditor}>{t("取消")}</Button>
+        {draftStale ? <Button key="copy" onClick={() => copy(draft.value)}>{t("复制草稿")}</Button>
+          : <Button key="save" form={editorForm} htmlType="submit" type="primary" loading={working}>
+            {working ? t("正在保存…") : t("保存更改")}
+          </Button>}
+      </div>
+    </>,
     onCancel: closeEditor,
   };
   const confirmStale = confirm && (!isReady || confirm.target.key !== target.key);
@@ -480,15 +521,16 @@ export default function StorageBar() {
       </div>}>{t("在 Chrome 扩展详情中允许访问此站点，或选择「在所有网站上」。")}</StateMessage>
     : <StateMessage title={t("无法访问目标页面")} action={target.status === "access-error" &&
       <Button onClick={refresh}>{t("重试")}</Button>}>{target.reason}</StateMessage>;
+  const webKind = section === "session" ? "session" : "local";
   const workspace = <section className="workspace" aria-label={t("存储记录")}>
-    {isReady ? <Records key={JSON.stringify([target.key, section, section === "storage" ? kind : null])}
-      target={target} section={section} kind={kind} setKind={setKind} revision={revision}
+    {isReady ? <Records key={JSON.stringify([target.key, section])}
+      target={target} section={section} revision={revision}
       automatic={prefs.automatic} density={prefs.density} workbench={workbench} working={working} refresh={refresh} copy={copy}
       showEditor={showEditor} editor={inlineDraft ? editor : null} showConfirm={openConfirm}
       openTransfer={(mode, focus, selectedKeys) => { rememberFocus(focus); setTransfer({ mode, target, selectedKeys }); }}
-      baseline={webBaselines[kind]?.tabId === target.tabId && webBaselines[kind]?.origin === target.origin ? webBaselines[kind] : null}
+      baseline={webBaselines[webKind]?.tabId === target.tabId && webBaselines[webKind]?.origin === target.origin ? webBaselines[webKind] : null}
       rememberBaseline={(area, value) => setWebBaselines((old) => ({ ...old, [area]: { ...value, tabId: target.tabId, origin: target.origin } }))}
-      undo={webUndo?.targetKey === target.key && webUndo?.kind === kind ? webUndo : null}
+      undo={webUndo?.targetKey === target.key && webUndo?.kind === webKind ? webUndo : null}
       rememberUndo={(area, entries) => setWebUndo({ targetKey: target.key, kind: area, entries })}
       forgetUndo={() => setWebUndo(null)} verify={verify} onWebWrite={bump}
       pendingNames={pendingNames} trackPending={trackPending} /> : targetStatus}
@@ -542,14 +584,23 @@ export default function StorageBar() {
         {isReady ? <MediaBrowser key={target.key} target={target} refreshVersion={mediaRevision}
           initialLocation={mediaLocation.current?.targetKey === target.key ? mediaLocation.current : null}
           onLocationChange={(location) => { mediaLocation.current = { targetKey: target.key, ...location }; }} /> : targetStatus}
-      </section> : <Tabs className="storage-tabs" size="small" tabBarGutter={12} activeKey={section} onChange={setSection}
-        destroyOnHidden items={sections.map(([key, label]) => ({ key, label: t(label),
-          disabled: !!draft && key !== section, children: key === section ? workspace : null }))} />}
+      </section> : <Tabs className="storage-tabs" size="small" tabBarGutter={10} activeKey={section} onChange={setSection}
+        destroyOnHidden items={sections.map(([key, label, shortLabel]) => ({
+          key,
+          label: <span className="tab-label" title={t(label)}>
+            <span className="tab-label-full">{t(label)}</span>
+            <span className="tab-label-short">{t(shortLabel)}</span>
+          </span>,
+          disabled: !!draft && key !== section,
+          children: key === section ? workspace : null,
+        }))} />}
     </div>
     {editor && !inlineDraft && <WideModal className="record-detail-modal" size={editor.size}
       title={editor.title} onCancel={editor.onCancel}
       footer={<div className="detail-actions record-edit-actions">{editor.footer}</div>}
-      closable={!working} keyboard={!working}><div className="record-editor-scroll">{editor.body}</div></WideModal>}
+      closable={!working} keyboard={!working}>
+      <div className={`record-editor-scroll${draft?.cookie ? " is-scrollable-form" : ""}`}>{editor.body}</div>
+    </WideModal>}
     {transfer && <CookieTransfer mode={transfer.mode} target={transfer.target} stale={!isReady || transfer.target.key !== target.key}
       verify={verify} onClose={() => setTransfer(null)} onWrite={bump} selectedKeys={transfer.selectedKeys} />}
     {confirm && <WideModal size="sm" className="confirm-modal"
@@ -618,7 +669,7 @@ export default function StorageBar() {
           <Typography.Text type="secondary" className="settings-section-title">{t("行为")}</Typography.Text>
           <div className="form-field"><span>{t("打开时的默认分类")}</span>
             <Select aria-label={t("打开时的默认分类")} value={settings.section}
-              options={sections.map(([value, label]) => ({ value, label }))} onChange={(value) => setSettings({ ...settings, section: value })} />
+              options={sections.map(([value, label]) => ({ value, label: t(label) }))} onChange={(value) => setSettings({ ...settings, section: value })} />
           </div>
           <label className="settings-toggle-row">
             <span className="settings-toggle-text">
