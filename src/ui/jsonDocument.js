@@ -65,10 +65,6 @@ export function jsonTree(text) {
   try { return read(null, [], 0); } catch { return null; }
 }
 
-export function jsonPointer(path) {
-  return path.map((part) => "/" + part.replaceAll("~", "~0").replaceAll("/", "~1")).join("");
-}
-
 export function hasRoundedInteger(text) {
   for (const [token] of text.matchAll(tokenPattern)) {
     if (!/^-?\d/.test(token)) continue;

@@ -174,45 +174,26 @@ async function executePage(operation, input, expectedOrigin) {
   }
   function readRecords(store) {
     const query = input.query;
-    const { indexName, range: constraint } = input.filter ?? {};
-    if (indexName != null && !store.indexNames.contains(indexName)) throw new Error("索引已不存在，请刷新");
-    const source = indexName == null ? store : store.index(indexName);
-    const lower = constraint?.lower === undefined ? undefined : decodeKey(constraint.lower);
-    const upper = constraint?.upper === undefined ? undefined : decodeKey(constraint.upper);
-    const range = lower !== undefined && upper !== undefined ? IDBKeyRange.bound(lower, upper, !!constraint.lowerOpen, !!constraint.upperOpen)
-      : lower !== undefined ? IDBKeyRange.lowerBound(lower, !!constraint.lowerOpen)
-        : upper !== undefined ? IDBKeyRange.upperBound(upper, !!constraint.upperOpen) : undefined;
-    const after = input.after ? [decodeKey(input.after.key), decodeKey(input.after.primaryKey)] : null;
+    const after = input.after ? decodeKey(input.after.primaryKey) : null;
     return new Promise((resolve, reject) => {
       const rows = [];
-      const request = source.openCursor(range);
+      const request = store.openCursor(after !== null ? IDBKeyRange.lowerBound(after, true) : undefined);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         try {
           const cursor = request.result;
           if (!cursor) { resolve({ rows, next: null }); return; }
-          if (after) {
-            const order = indexedDB.cmp(cursor.key, after[0]);
-            if (order < 0) { cursor.continue(after[0]); return; }
-            if (order === 0) {
-              const primaryOrder = indexedDB.cmp(cursor.primaryKey, after[1]);
-              if (primaryOrder < 0 && indexName != null) { cursor.continuePrimaryKey(...after); return; }
-              if (primaryOrder <= 0) { cursor.continue(); return; }
-            }
-          }
           const key = encodeKey(cursor.primaryKey);
-          const indexKey = indexName == null ? undefined : encodeKey(cursor.key);
           const title = labelKey(key);
           const value = cursor.value;
           if (!query || title.toLowerCase().includes(query) || matchesValue(value, query)) {
             if (rows.length === input.limit) {
               const last = rows.at(-1);
-              resolve({ rows, next: { key: last.indexKey ?? last.key, primaryKey: last.key } });
+              resolve({ rows, next: { primaryKey: last.key } });
               return;
             }
             const preview = typeof value === "string" ? value.slice(0, 160) : JSON.stringify(typedPreview(value, new Set(), 0, { nodes: 12 })).slice(0, 160);
-            rows.push({ id: JSON.stringify(indexKey ? [indexKey, key] : key), key, title, preview,
-              ...(indexKey ? { indexKey, indexTitle: labelKey(indexKey) } : {}) });
+            rows.push({ id: JSON.stringify(key), key, title, preview });
           }
           cursor.continue();
         } catch (error) {
@@ -289,8 +270,8 @@ async function executePage(operation, input, expectedOrigin) {
     state.caches.set(input.cacheName, entries);
     return rows;
   }
-  async function exactRequest(cache) {
-    const identity = state.caches.get(input.cacheName)?.get(input.id);
+  async function exactRequest(cache, id = input.id) {
+    const identity = state.caches.get(input.cacheName)?.get(id);
     if (!identity) throw new Error("缓存条目已变化，请刷新后重试");
     const candidates = (await cache.keys()).filter((request) => requestId(request) === identity);
     if (candidates.length !== 1) throw new Error("无法唯一定位缓存条目，请刷新");
@@ -783,6 +764,20 @@ async function executePage(operation, input, expectedOrigin) {
       case "cacheDeleteEntry": {
         const cache = await openCache(input.cacheName);
         if (!await cache.delete(await exactRequest(cache))) throw new Error("缓存条目已不存在，请刷新");
+        break;
+      }
+      case "cacheDeleteEntries": {
+        const cache = await openCache(input.cacheName);
+        const results = [];
+        for (const { id, name } of input.entries) {
+          try {
+            const deleted = await cache.delete(await exactRequest(cache, id));
+            results.push({ name, ...(deleted ? result("success") : result("failed", "缓存条目已不存在，请刷新")) });
+          } catch (error) {
+            results.push({ name, ...result("failed", message(error)) });
+          }
+        }
+        data = results;
         break;
       }
       case "cacheDelete":

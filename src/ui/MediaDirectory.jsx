@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CaretRightOutlined, ContainerOutlined, DatabaseOutlined, FolderOpenOutlined, FolderOutlined, HddOutlined, TableOutlined,
-} from "@ant-design/icons";
 import { Spin, Tree, Typography } from "antd";
 import { runInPage } from "../api/page.js";
+import { IconBucket, IconCache, IconDatabase, IconFolder, IconFolderOpen, IconTable, IconTreeChevron } from "./Icons.jsx";
 import { usePreferences } from "./preferences.js";
 
 export const mediaRoots = { opfs: "OPFS", idb: "IndexedDB", cache: "Cache" };
@@ -22,20 +20,20 @@ export async function readMediaFolders(target, kind, path, offset = 0) {
 function nodeIcon({ expanded, data }) {
   const depth = data.folder.length;
   if (data.source === "idb") {
-    if (depth === 0) return <DatabaseOutlined className="media-tree-root-icon" />;
-    if (depth === 1) return <DatabaseOutlined className="media-tree-folder-icon" />;
-    return <TableOutlined className="media-tree-leaf-icon" />;
+    if (depth === 0) return <IconDatabase className="media-tree-root-icon" />;
+    if (depth === 1) return <IconDatabase className="media-tree-folder-icon" />;
+    return <IconTable className="media-tree-leaf-icon" />;
   }
   if (data.source === "cache") {
-    if (depth === 0) return <HddOutlined className="media-tree-root-icon" />;
-    return <ContainerOutlined className="media-tree-leaf-icon" />;
+    if (depth === 0) return <IconCache className="media-tree-root-icon" />;
+    return <IconBucket className="media-tree-leaf-icon" />;
   }
   const cls = depth === 0 ? "media-tree-root-icon" : "media-tree-folder-icon";
-  return expanded ? <FolderOpenOutlined className={cls} /> : <FolderOutlined className={cls} />;
+  return expanded ? <IconFolderOpen className={cls} /> : <IconFolder className={cls} />;
 }
 
 function switcherIcon({ expanded }) {
-  return <CaretRightOutlined className={expanded ? "media-tree-arrow is-open" : "media-tree-arrow"} />;
+  return <IconTreeChevron className={expanded ? "media-tree-arrow is-open" : "media-tree-arrow"} />;
 }
 
 export default function MediaDirectory({ target, kind, path, onNavigate }) {

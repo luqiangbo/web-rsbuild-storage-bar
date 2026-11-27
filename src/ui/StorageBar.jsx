@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  DatabaseOutlined, DeleteOutlined, ExclamationCircleFilled, ExportOutlined,
-  LockOutlined, ReloadOutlined, RollbackOutlined, SettingOutlined, UnlockOutlined, VideoCameraOutlined,
-} from "@ant-design/icons";
 import { Alert, App, Badge, Button, Checkbox, DatePicker, Input, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import { cookieSameSite, deleteCookies, getSiteCookies, saveCookie } from "../api/cookies.js";
 import { runInPage, verifyTarget } from "../api/page.js";
 import Records, { StateMessage } from "./Records.jsx";
+import { PAGE_SIZE } from "./useRecords.js";
 import { useTarget } from "./useTarget.js";
 import CookieTransfer from "./CookieTransfer.jsx";
 import IconAction from "./IconAction.jsx";
+import {
+  IconAlert, IconDatabase, IconDelete, IconExternal, IconLock, IconMedia, IconRefresh, IconRevert, IconSettings, IconUnlock,
+} from "./Icons.jsx";
 import JsonEditor from "./JsonEditor.jsx";
 import { hasRoundedInteger, jsonError } from "./jsonDocument.js";
 import { usePreferences } from "./preferences.js";
@@ -44,11 +44,7 @@ const route = new URLSearchParams(location.search);
 const workbench = route.get("view") === "workspace";
 const sourceTab = route.get("target");
 const initialTabId = workbench && /^\d+$/.test(sourceTab ?? "") && Number.isSafeInteger(Number(sourceTab)) ? Number(sourceTab) : null;
-const rawRouteSection = route.get("section");
-const resolvedRouteSection = rawRouteSection === "storage"
-  ? (route.get("kind") === "session" ? "session" : "local")
-  : rawRouteSection;
-const initialSection = workbench && sections.some(([key]) => key === resolvedRouteSection) ? resolvedRouteSection : null;
+const initialSection = workbench && sections.some(([key]) => key === route.get("section")) ? route.get("section") : null;
 const draftFields = ({ key, value, expiration, cookie }) => JSON.stringify([key, value, expiration, cookie]);
 
 function expirationInput(cookie) {
@@ -138,7 +134,7 @@ function Editor({ draft, setDraft, working, stale, savingError, save }) {
           {inlineKeyInput ? <div className="json-editor-leading">{inlineKeyInput}</div>
             : <Typography.Text type="secondary" className="cell-text json-editor-meta">{idbMeta || t("值")}</Typography.Text>}
           {!stale && !working && textDirty && <div className="action-strip json-editor-actions" role="group" aria-label={t("编辑器操作")}>
-            <IconAction icon={<RollbackOutlined />} label={t("还原修改")} onClick={() => set("value", draft.initialValue)} />
+            <IconAction icon={<IconRevert />} label={t("还原修改")} onClick={() => set("value", draft.initialValue)} />
           </div>}
         </div>}
         <label className={`form-field${cookie ? "" : " form-field-grow"}`}>
@@ -207,6 +203,7 @@ export default function StorageBar() {
   const [transfer, setTransfer] = useState(null);
   const [webBaselines, setWebBaselines] = useState({});
   const [webUndo, setWebUndo] = useState(null);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [targetPickerOpen, setTargetPickerOpen] = useState(false);
   const busy = useRef(false);
   const focusReturn = useRef(null);
@@ -238,7 +235,6 @@ export default function StorageBar() {
     if (area === "media") url.searchParams.set("area", "media");
     else url.searchParams.delete("area");
     url.searchParams.set("section", section);
-    url.searchParams.delete("kind");
     if (target.tabId == null) url.searchParams.delete("target");
     else url.searchParams.set("target", String(target.tabId));
     history.replaceState(null, "", url);
@@ -525,6 +521,7 @@ export default function StorageBar() {
   const workspace = <section className="workspace" aria-label={t("存储记录")}>
     {isReady ? <Records key={JSON.stringify([target.key, section])}
       target={target} section={section} revision={revision}
+      pageSize={pageSize} onPageSizeChange={setPageSize}
       automatic={prefs.automatic} density={prefs.density} workbench={workbench} working={working} refresh={refresh} copy={copy}
       showEditor={showEditor} editor={inlineDraft ? editor : null} showConfirm={openConfirm}
       openTransfer={(mode, focus, selectedKeys) => { rememberFocus(focus); setTransfer({ mode, target, selectedKeys }); }}
@@ -537,9 +534,9 @@ export default function StorageBar() {
   </section>;
   const showMedia = area === "media";
   const workspaceSwitch = <div className="workspace-switch" role="group" aria-label={t("工作区")}>
-    <IconAction icon={<DatabaseOutlined />} label={t("本地存储")} aria-pressed={!showMedia}
+    <IconAction icon={<IconDatabase />} label={t("本地存储")} aria-pressed={!showMedia}
       aria-controls="storagebar-workspace" disabled={!!draft || working} onClick={() => setArea("storage")} />
-    <IconAction icon={<VideoCameraOutlined />} label={t("本地媒体")} aria-pressed={showMedia}
+    <IconAction icon={<IconMedia />} label={t("本地媒体")} aria-pressed={showMedia}
       aria-controls="storagebar-workspace" disabled={!!draft || working} onClick={() => setArea("media")} />
   </div>;
 
@@ -559,22 +556,22 @@ export default function StorageBar() {
             </span>}
             onChange={targetControl.select} />
         </Tooltip>
-        {workbench ? currentTab && <IconAction type="default" className="target-lock" icon={<LockOutlined />}
+        {workbench ? currentTab && <IconAction type="default" className="target-lock" icon={<IconLock />}
           label={t("工作台已锁定目标")} aria-disabled="true" />
           : <IconAction type="default" className="target-lock" aria-pressed={targetControl.locked}
-          icon={targetControl.locked ? <LockOutlined /> : <UnlockOutlined />}
+          icon={targetControl.locked ? <IconLock /> : <IconUnlock />}
           label={targetControl.locked ? t("已锁定，点击恢复跟随") : t("跟随中，点击锁定当前标签页")}
           disabled={target.tabId == null} onClick={targetControl.toggle} />}
       </Space.Compact>
       <div className="action-strip" role="group" aria-label={t("侧栏操作")}>
         <div className="action-group">
-          <IconAction icon={<ReloadOutlined />} label={t("刷新")} onClick={refresh} disabled={working} />
-          {!workbench && <IconAction icon={<ExportOutlined />} label={t("在新标签页打开")} onClick={() => void openWorkbench()} />}
-          <IconAction icon={<SettingOutlined />} label={t("设置")} aria-haspopup="dialog" ref={settingsButton}
+          <IconAction icon={<IconRefresh />} label={t("刷新")} onClick={refresh} disabled={working} />
+          {!workbench && <IconAction icon={<IconExternal />} label={t("在新标签页打开")} onClick={() => void openWorkbench()} />}
+          <IconAction icon={<IconSettings />} label={t("设置")} aria-haspopup="dialog" ref={settingsButton}
             onClick={() => { rememberFocus(settingsButton); setSettingsError(""); setSettings({ ...prefs }); }} />
         </div>
         <div className="action-group">
-          <IconAction danger icon={<DeleteOutlined />} label={t("清理当前站点")} aria-haspopup="dialog"
+          <IconAction danger icon={<IconDelete />} label={t("清理当前站点")} aria-haspopup="dialog"
             disabled={!isReady || working} onClick={clearSite} />
         </div>
       </div>
@@ -604,7 +601,7 @@ export default function StorageBar() {
     {transfer && <CookieTransfer mode={transfer.mode} target={transfer.target} stale={!isReady || transfer.target.key !== target.key}
       verify={verify} onClose={() => setTransfer(null)} onWrite={bump} selectedKeys={transfer.selectedKeys} />}
     {confirm && <WideModal size="sm" className="confirm-modal"
-      title={<span className="confirm-title"><ExclamationCircleFilled className="confirm-title-icon" aria-hidden="true" /><span>{confirm.title}</span></span>}
+      title={<span className="confirm-title"><IconAlert className="confirm-title-icon" aria-hidden="true" /><span>{confirm.title}</span></span>}
       onCancel={() => setConfirm(null)}
       closable={!working} keyboard={!working} footer={[
         <Button key="cancel" disabled={working} onClick={() => setConfirm(null)}>{t("取消")}</Button>,

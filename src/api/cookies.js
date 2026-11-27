@@ -115,26 +115,97 @@ function exportFields({ name, value, domain, path, hostOnly, secure, httpOnly, s
   return { name, value, domain, path, hostOnly, secure, httpOnly, sameSite, expirationDate };
 }
 
-export function exportCookies(target, cookies, compatible = false) {
-  if (compatible) return JSON.stringify(cookies.map((cookie) => ({
+export function exportCookies(target, cookies, format = "json") {
+  if (format === "header") {
+    return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+  }
+  if (format === "netscape") {
+    const lines = [
+      "# Netscape HTTP Cookie File",
+      `# Exported from ${target.origin} by StorageBar`,
+      "",
+    ];
+    for (const cookie of cookies) {
+      const hostPrefix = cookie.httpOnly ? "#HttpOnly_" : "";
+      const domain = cookie.hostOnly ? cookie.domain.replace(/^\./, "") : (cookie.domain.startsWith(".") ? cookie.domain : `.${cookie.domain}`);
+      const includeSubdomains = cookie.hostOnly ? "FALSE" : "TRUE";
+      const secure = cookie.secure ? "TRUE" : "FALSE";
+      const expiry = cookie.session || cookie.expirationDate == null ? "0" : String(Math.floor(cookie.expirationDate));
+      lines.push([`${hostPrefix}${domain}`, includeSubdomains, cookie.path, secure, expiry, cookie.name, cookie.value].join("\t"));
+    }
+    return lines.join("\n");
+  }
+  return JSON.stringify(cookies.map((cookie) => ({
     ...exportFields(cookie), session: cookie.session ?? cookie.expirationDate === undefined,
   })), null, 2);
-  return JSON.stringify({
-    format: "storagebar-cookies", version: 1, hostname: target.hostname, exportedAt: new Date().toISOString(),
-    cookies: cookies.map(exportFields),
-  }, null, 2);
+}
+
+function parseNetscapeCookies(text) {
+  const entries = [];
+  for (const rawLine of text.replace(/\r\n/g, "\n").split("\n")) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    let httpOnly = false;
+    if (line.startsWith("#HttpOnly_")) {
+      httpOnly = true;
+      line = line.slice("#HttpOnly_".length);
+    } else if (line.startsWith("#")) {
+      continue;
+    }
+    const parts = line.split("\t");
+    if (parts.length < 7) throw new Error("Netscape Cookie 格式不正确，每行需要 7 列制表符字段");
+    const [rawDomain, includeSub, path, rawSecure, rawExpiry, name, ...rest] = parts;
+    const value = rest.join("\t");
+    const hostOnly = includeSub.toUpperCase() !== "TRUE" && !rawDomain.startsWith(".");
+    const expiryNum = Number(rawExpiry);
+    const expirationDate = Number.isFinite(expiryNum) && expiryNum > 0 ? expiryNum : undefined;
+    entries.push({
+      name, value, domain: rawDomain, path: path || "/", hostOnly,
+      secure: rawSecure.toUpperCase() === "TRUE", httpOnly, sameSite: "unspecified",
+      session: expirationDate === undefined, expirationDate,
+    });
+  }
+  return entries;
+}
+
+function parseHeaderCookies(target, text) {
+  const cleaned = text.trim().replace(/^cookie\s*:\s*/i, "");
+  const entries = [];
+  for (const part of cleaned.split(/;+/)) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) throw new Error("Header Cookie 格式不正确，应为 name=value; name2=value2");
+    const name = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    entries.push({
+      name, value, domain: target.hostname, path: "/", hostOnly: true,
+      secure: target.protocol === "https:", httpOnly: false, sameSite: "unspecified",
+      session: true, expirationDate: undefined,
+    });
+  }
+  return entries;
 }
 
 export async function prepareCookieImport(target, fileText) {
-  let backup;
-  try { backup = JSON.parse(fileText); } catch { throw new Error("无法解析 JSON 文件"); }
-  const compatible = Array.isArray(backup);
-  if (!compatible && (backup?.format !== "storagebar-cookies" || backup.version !== 1 || !Array.isArray(backup.cookies))) {
-    throw new Error("请选择 StorageBar 备份或 Cookie-Editor JSON 数组");
+  const trimmed = fileText.trim();
+  if (!trimmed) throw new Error("请粘贴 Cookie 内容");
+  let entries;
+  const looksNetscape = /^#\s*(?:Netscape|HTTP Cookie)/im.test(trimmed) ||
+    trimmed.split(/\r?\n/).some((line) => (line.startsWith("#HttpOnly_") || !line.trim().startsWith("#")) && line.split("\t").length >= 7);
+
+  if (trimmed.startsWith("[")) {
+    try { entries = JSON.parse(trimmed); } catch { throw new Error("无法解析 JSON 内容"); }
+    if (!Array.isArray(entries)) throw new Error("支持 JSON 数组、Header 字符串或 Netscape 格式");
+  } else if (looksNetscape) {
+    entries = parseNetscapeCookies(trimmed);
+  } else if (trimmed.includes("=")) {
+    entries = parseHeaderCookies(target, trimmed);
+  } else {
+    throw new Error("支持 JSON 数组、Header 字符串或 Netscape 格式");
   }
-  if (!compatible && backup.hostname !== target.hostname) throw new Error("备份站点与当前目标不一致");
-  const entries = compatible ? backup : backup.cookies;
-  if (!entries.length || entries.length > 5000) throw new Error("备份应包含 1–5000 条 Cookie");
+
+  if (!entries.length || entries.length > 5000) throw new Error("导入内容应包含 1–5000 条 Cookie");
   const storeId = await cookieStore(target.tabId);
   const existing = new Map((await getSiteCookies(target)).map((item) => [cookieId(item), item]));
   const seen = new Set();
@@ -142,8 +213,9 @@ export async function prepareCookieImport(target, fileText) {
   const preview = [];
   for (const [index, raw] of entries.entries()) {
     try {
-      const input = compatible && raw && typeof raw === "object" ? {
-        ...raw, hostOnly: raw.hostOnly ?? (typeof raw.domain === "string" && !raw.domain.startsWith(".")),
+      const input = raw && typeof raw === "object" ? {
+        ...raw,
+        hostOnly: raw.hostOnly ?? (typeof raw.domain === "string" && !raw.domain.startsWith(".")),
         sameSite: raw.sameSite ?? "unspecified",
         expirationDate: raw.session === true ? undefined : raw.expirationDate ?? undefined,
       } : raw;

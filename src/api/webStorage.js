@@ -1,27 +1,25 @@
-export const backupFormat = "storagebar-web-storage";
-
-export function parseWebBackup(text, kind) {
-  let backup;
-  try { backup = JSON.parse(text); } catch { throw new Error("无法解析 JSON 文件"); }
-  if (backup?.format !== backupFormat || backup.version !== 1 || typeof backup.origin !== "string" ||
-      !Array.isArray(backup.entries)) throw new Error("请选择 StorageBar 的 Web Storage 备份");
-  let origin;
-  try { origin = new URL(backup.origin); } catch { throw new Error("备份来源无效"); }
-  if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== backup.origin) throw new Error("备份来源无效");
-  if (backup.kind !== kind) throw new Error("备份与当前存储类型不一致");
-  const keys = new Set();
-  for (const entry of backup.entries) {
-    if (!entry || typeof entry.key !== "string" || typeof entry.value !== "string" || keys.has(entry.key)) {
-      throw new Error("备份包含无效或重复的键值");
-    }
-    keys.add(entry.key);
+export function parseWebBackup(text) {
+  let parsed;
+  try { parsed = JSON.parse(text.trim()); } catch { throw new Error("无法解析 JSON 内容"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("请粘贴键值对 JSON 对象，例如 {\"key\": \"value\"}");
   }
-  return { origin: backup.origin, entries: backup.entries.map(({ key, value }) => ({ key, value })) };
+  const entries = Object.entries(parsed).map(([key, value]) => ({
+    key,
+    value: typeof value === "string" ? value : JSON.stringify(value),
+  }));
+  if (!entries.length) throw new Error("JSON 对象为空，没有可导入的键值");
+  return entries;
 }
 
-export function makeWebBackup(origin, kind, rows) {
-  return JSON.stringify({ format: backupFormat, version: 1, origin, kind,
-    entries: rows.map(({ id, value }) => ({ key: id, value })) }, null, 2);
+export function exportWebStorage(kind, rows, format = "json") {
+  if (format === "script") {
+    const api = kind === "session" ? "sessionStorage" : "localStorage";
+    return rows.map(({ id, value }) => `${api}.setItem(${JSON.stringify(id)}, ${JSON.stringify(value)});`).join("\n");
+  }
+  const map = {};
+  for (const { id, value } of rows) map[id] = value;
+  return JSON.stringify(map, null, 2);
 }
 
 export function compareWebStorage(before, after) {

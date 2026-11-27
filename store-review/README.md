@@ -1,14 +1,14 @@
 # StorageBar · Chrome Web Store 审核资料
 
-规格与政策核对日期：2026-11-22。
+规格与政策核对日期：2026-11-27（v2.0.0）。
 
 ## 上传素材
 
 | Dashboard 字段 | 文件 | 规格 |
 |---|---|---|
 | 扩展图标 | [icon128.png](../public/icons/icon128.png) | 128×128 PNG，图形在中央 96×96 内，四边各留 16px 透明区 |
-| 简体中文截图 | [工作台](images/zh-01-workspace-1280x800.png) · [JSON](images/zh-02-json-1280x800.png) · [Cookies](images/zh-03-cookies-1280x800.png) | 1280×800 RGB PNG |
-| 英文截图 | [Workspace](images/en-01-workspace-1280x800.png) · [JSON](images/en-02-json-1280x800.png) · [Cookies](images/en-03-cookies-1280x800.png) | 1280×800 RGB PNG |
+| 简体中文截图 | [工作台](images/zh-01-workspace-1280x800.png) · [JSON](images/zh-02-json-1280x800.png) · [Cookies](images/zh-03-cookies-1280x800.png) · [本地媒体](images/zh-04-media-1280x800.png) | 1280×800 RGB PNG |
+| 英文截图 | [Workspace](images/en-01-workspace-1280x800.png) · [JSON](images/en-02-json-1280x800.png) · [Cookies](images/en-03-cookies-1280x800.png) · [Local Media](images/en-04-media-1280x800.png) | 1280×800 RGB PNG |
 | 小宣传图 | [promo-small-440x280.png](images/promo-small-440x280.png) | 440×280 RGB PNG，可选 |
 | 大宣传图 | [promo-marquee-1400x560.png](images/promo-marquee-1400x560.png) | 1400×560 RGB PNG，可选 |
 

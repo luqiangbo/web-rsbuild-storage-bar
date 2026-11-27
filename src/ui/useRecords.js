@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cookieId, getSiteCookies } from "../api/cookies.js";
 import { runInPage } from "../api/page.js";
 
-export const PAGE_SIZE = 50;
+export const PAGE_SIZES = [50, 100];
+export const PAGE_SIZE = PAGE_SIZES[0];
 const empty = { status: "loading", rows: [], next: null };
 
 export function useRead(key, load, delay = 0, retainKey = null) {
@@ -97,18 +98,18 @@ export function useCatalog(target, section, revision, dbName, pendingNames) {
   return { catalog, stores, databases, caches, selectedDb };
 }
 
-export function useRecordList(target, scope, revision, query, cursor, automatic, filter = null) {
+export function useRecordList(target, scope, revision, query, cursor, automatic, pageSize = PAGE_SIZE) {
   const isStorage = scope.section === "local" || scope.section === "session";
   const web = useWebStorage(target, scope.section === "session" ? "session" : "local", revision, automatic, isStorage);
   const queryKey = scope.section === "idb" ? query.toLowerCase() : "";
   const canRead = scope.section === "cookies" || (scope.section === "cache" && scope.cacheName !== null) ||
     (scope.section === "idb" && scope.dbName !== null && scope.storeName !== null);
-  const group = canRead ? JSON.stringify([scope, queryKey, cursor, filter]) : null;
+  const group = canRead ? JSON.stringify([scope, queryKey, cursor, pageSize]) : null;
   const key = canRead ? JSON.stringify([group, revision]) : null;
   const { section, dbName, storeName, cacheName } = scope;
   const load = useCallback(async () => {
     if (section === "idb") {
-      return runInPage(target, "idbRead", { dbName, storeName, query: queryKey, after: cursor, limit: PAGE_SIZE, filter });
+      return runInPage(target, "idbRead", { dbName, storeName, query: queryKey, after: cursor, limit: pageSize });
     }
     if (section === "cache") return { rows: await runInPage(target, "cacheRead", { cacheName }) };
     return {
@@ -116,7 +117,7 @@ export function useRecordList(target, scope, revision, query, cursor, automatic,
         id: cookieId(cookie), title: cookie.name, preview: `${cookie.domain}${cookie.path}`, cookie,
       })),
     };
-  }, [target, section, dbName, storeName, cacheName, queryKey, cursor, filter]);
+  }, [target, section, dbName, storeName, cacheName, queryKey, cursor, pageSize]);
   const remote = useRead(key, load, queryKey ? 180 : 0, group);
   return isStorage ? web : remote;
 }

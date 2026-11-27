@@ -1,18 +1,17 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  CopyOutlined, DatabaseOutlined, DeleteOutlined, DiffOutlined, DownloadOutlined,
-  HddOutlined, KeyOutlined, LeftOutlined, PlusOutlined, PushpinOutlined, RightOutlined, SearchOutlined,
-  TableOutlined, UndoOutlined, UploadOutlined,
-} from "@ant-design/icons";
 import { Alert, Button, Checkbox, Input, Select, Spin, Table, Tag, Tooltip, Typography } from "antd";
-import { deleteCookies, getSiteCookies } from "../api/cookies.js";
+import { deleteCookies } from "../api/cookies.js";
 import { runInPage } from "../api/page.js";
 import JsonViewer from "./JsonViewer.jsx";
 import IconAction from "./IconAction.jsx";
+import {
+  IconCache, IconCopy, IconDatabase, IconDelete, IconDiff, IconExport, IconImport,
+  IconKey, IconNext, IconPin, IconPlus, IconPrev, IconSearch, IconTable, IconUndo,
+} from "./Icons.jsx";
 import { formatJson, jsonError, jsonTree, jsonTreeLimit } from "./jsonDocument.js";
 import { usePreferences } from "./preferences.js";
 import { MediaPreview } from "./MediaBrowser.jsx";
-import { PAGE_SIZE, useCatalog, useRead, useRecordList } from "./useRecords.js";
+import { PAGE_SIZE, PAGE_SIZES, useCatalog, useRead, useRecordList } from "./useRecords.js";
 import WideModal from "./WideModal.jsx";
 import WebStorageTools from "./WebStorageTools.jsx";
 import SearchMatch from "./SearchMatch.jsx";
@@ -99,7 +98,7 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
     <Button type="text" size="small" className="record-title-copy"
       aria-label={t("复制标题 {name}", { name })} onClick={() => copy(row.title)}>
       <span className="cell-text">{name}</span>
-      <CopyOutlined className="record-title-copy-icon" aria-hidden="true" />
+      <IconCopy className="record-title-copy-icon" aria-hidden="true" />
     </Button>
   </Tooltip>;
   const close = editor?.onCancel ?? onClose;
@@ -109,15 +108,15 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
     : <div className="record-detail-footer">
       <div className="action-strip record-detail-tools" role="group" aria-label={t("记录操作")}>
         <div className="action-group">
-          {text !== undefined && !state.refreshing && <IconAction icon={<CopyOutlined />}
+          {text !== undefined && !state.refreshing && <IconAction icon={<IconCopy />}
             label={t(viewJson ? "复制格式化 JSON" : section === "idb" && !detail.value?.editable ? "复制预览" : "复制值")}
             onClick={() => copy(copyValue)} />}
-          {section === "cache" && <IconAction icon={<CopyOutlined />} label={t("复制 URL")} onClick={() => copy(row.title)} />}
-          {canPin && <IconAction icon={<PushpinOutlined />} label={t(pinned ? "取消固定详情" : "固定详情")}
+          {section === "cache" && <IconAction icon={<IconCopy />} label={t("复制 URL")} onClick={() => copy(row.title)} />}
+          {canPin && <IconAction icon={<IconPin />} label={t(pinned ? "取消固定详情" : "固定详情")}
             aria-pressed={pinned} onClick={onPin} />}
         </div>
         <div className="action-group">
-          <IconAction danger icon={<DeleteOutlined />} label={t("删除")} aria-haspopup="dialog"
+          <IconAction danger icon={<IconDelete />} label={t("删除")} aria-haspopup="dialog"
             disabled={cannotDelete} onClick={remove} />
         </div>
       </div>
@@ -184,7 +183,7 @@ function RecordDetail({ target, scope, row, currentRow, listStatus, revision, on
   </WideModal>;
 }
 
-export default function Records({ target, section, revision, automatic, density, workbench, working,
+export default function Records({ target, section, revision, pageSize = PAGE_SIZE, onPageSizeChange, automatic, density, workbench, working,
   refresh, showEditor, editor, showConfirm, openTransfer, copy, pendingNames, trackPending,
   baseline, rememberBaseline, undo, rememberUndo, forgetUndo, verify, onWebWrite }) {
   const { t, language } = usePreferences();
@@ -221,9 +220,9 @@ export default function Records({ target, section, revision, automatic, density,
   const selectedCache = caches.includes(cacheName) ? cacheName : caches[0] ?? null;
   const dbPending = pendingNames.has(selectedDb) || databases.some((db) => db.name === selectedDb && db.pending);
   const scope = { section, kind, dbName: selectedDb, storeName: dbPending ? null : selectedStore?.name ?? null, cacheName: selectedCache };
-  const pageKey = JSON.stringify([scope, query]);
+  const pageKey = JSON.stringify([scope, query, pageSize]);
   const activePage = page.key === pageKey ? page : { key: pageKey, index: 0, cursors: [null] };
-  const records = useRecordList(target, scope, revision, query.trim(), activePage.cursors[activePage.index], automatic, null);
+  const records = useRecordList(target, scope, revision, query.trim(), activePage.cursors[activePage.index], automatic, pageSize);
   const storeCount = useCallback(() => runInPage(target, "idbCount", { dbName: selectedDb, storeName: scope.storeName }),
     [target, selectedDb, scope.storeName]);
   const count = useRead(section === "idb" && scope.storeName !== null ? JSON.stringify([selectedDb, scope.storeName, revision]) : null, storeCount);
@@ -236,11 +235,11 @@ export default function Records({ target, section, revision, automatic, density,
   const filtered = section === "idb" || !searchTerm ? allRows : allRows.filter((row) => [
     row.title, row.value, row.preview, row.cookie?.value,
   ].some((value) => value?.toLowerCase().includes(searchTerm)));
-  const totalPages = section === "idb" ? null : Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const totalPages = section === "idb" ? null : Math.max(1, Math.ceil(filtered.length / pageSize));
   const index = section === "idb" ? activePage.index : Math.min(activePage.index, totalPages - 1);
-  const rows = section === "idb" ? filtered : filtered.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE);
+  const rows = section === "idb" ? filtered : filtered.slice(index * pageSize, (index + 1) * pageSize);
   const chosen = rows.filter((row) => selection.has(row.id));
-  const hasNext = section === "idb" ? !!records.value?.next : (index + 1) * PAGE_SIZE < filtered.length;
+  const hasNext = section === "idb" ? !!records.value?.next : (index + 1) * pageSize < filtered.length;
   const catalogLoading = (section === "idb" || section === "cache") && (catalog.status === "loading" || catalog.refreshing);
   const busy = catalogLoading || (section === "idb" && selectedDb !== null && !dbPending && (stores.status === "loading" || stores.refreshing))
     || (!missingScope && records.status === "loading");
@@ -289,6 +288,10 @@ export default function Records({ target, section, revision, automatic, density,
     });
   }
 
+  function changePageSize(next) {
+    onPageSizeChange?.(next);
+    resetView();
+  }
   function deleteRows(list, batch = false) {
     if (section === "idb") list = [...new Map(list.map((row) => [JSON.stringify(row.key), row])).values()];
     const count = list.length;
@@ -298,8 +301,15 @@ export default function Records({ target, section, revision, automatic, density,
       scope: scopeTitle, details, label: t("删除"), focus: search,
       run: async (verify) => {
         if (section === "cache") {
-          await runInPage(target, "cacheDeleteEntry", { cacheName: selectedCache, id: list[0].id });
-          return { message: t("缓存条目已删除") };
+          if (list.length === 1) {
+            await runInPage(target, "cacheDeleteEntry", { cacheName: selectedCache, id: list[0].id });
+            return { message: t("缓存条目已删除") };
+          }
+          const results = await runInPage(target, "cacheDeleteEntries", {
+            cacheName: selectedCache,
+            entries: list.map(({ id, title }) => ({ id, name: title })),
+          });
+          return { message: t("已删除 {done}/{count} 项", { done: results.filter(({ status }) => status === "success").length, count }), results };
         }
         if (webStorage && batch) {
           const deleted = await runInPage(target, "storageDeleteBatch", { kind,
@@ -318,33 +328,14 @@ export default function Records({ target, section, revision, automatic, density,
       after: () => { resetSelection(); setActiveRow(null); },
     });
   }
-  function clearScope(database = false) {
-    if (database) {
-      showConfirm({
-        target, title: t("删除 IndexedDB 数据库？"), scope: nameLabel(selectedDb, t),
-        details: t("会删除此数据库及其中的所有对象仓库和记录。"), label: t("删除数据库"), focus: search,
-        run: async () => {
-          const result = await runInPage(target, "idbDeleteDatabase", { dbName: selectedDb });
-          return { message: t("数据库已删除"), results: [{ name: selectedDb, ...result }], database: true };
-        },
-      });
-      return;
-    }
-    const clear = webStorage ? "storageClear" : section === "idb" ? "idbClear" : "cacheDelete";
+  function deleteDatabase() {
     showConfirm({
-      target, title: section === "cache" ? t("删除整个 Cache？") : t("清空此存储区？"), focus: search,
-      scope: scopeTitle, details: section === "cookies" ? t("当前有 {count} 个可访问的未分区 Cookie，清理也可能影响父域共享 Cookie。", { count: allRows.length })
-        : section === "idb" ? t("此对象仓库内的全部记录都会被删除。")
-          : t("此范围内的全部记录都会被删除，当前有 {count} 条。", { count: allRows.length }), label: section === "cache" ? t("删除缓存") : t("清空"),
-      run: async (verify) => {
-        if (section === "cookies") {
-          const results = await deleteCookies(target, await getSiteCookies(target), verify);
-          return { message: t("已删除 {done}/{count} 项", { done: results.filter(({ status }) => status === "success").length, count: results.length }), results };
-        }
-        await runInPage(target, clear, { kind, dbName: selectedDb, storeName: scope.storeName, cacheName: selectedCache });
-        return { message: t(section === "cache" ? "缓存已删除" : "存储区已清空") };
+      target, title: t("删除 IndexedDB 数据库？"), scope: nameLabel(selectedDb, t),
+      details: t("会删除此数据库及其中的所有对象仓库和记录。"), label: t("删除数据库"), focus: search,
+      run: async () => {
+        const result = await runInPage(target, "idbDeleteDatabase", { dbName: selectedDb });
+        return { message: t("数据库已删除"), results: [{ name: selectedDb, ...result }], database: true };
       },
-      after: resetSelection,
     });
   }
 
@@ -357,7 +348,6 @@ export default function Records({ target, section, revision, automatic, density,
       setActiveRow((current) => current && { ...current, row: { ...current.row, id: key, title: key } });
     } : undefined,
   });
-  const canClear = webStorage || section === "idb" || section === "cache" || allRows.length > 0;
   const listError = catalogError || (section === "idb" && !dbPending && selectedDb !== null && stores.status === "error" ? stores.error : null) ||
     (!missingScope && records.status === "error" ? records.error : null);
   const canRowAct = !working && !busy && !editor && !listError && !records.refreshing;
@@ -367,60 +357,63 @@ export default function Records({ target, section, revision, automatic, density,
     ? <SearchMatch text={text} query={query.trim()} /> : fallback;
 
   const keyColumnWidth = section === "cache" ? undefined
-    : section === "idb" ? (width >= 520 ? 180 : 120)
-      : webStorage ? (width >= 520 ? 220 : 130)
-        : (width >= 600 ? 220 : "48%");
+    : section === "idb" ? (width >= 520 ? 170 : 110)
+      : webStorage ? (width >= 520 ? 200 : 116)
+        : (width >= 600 ? 180 : 112);
 
   const columns = [
-    ...(section !== "cache" ? [{
-      key: "selected", width: 36, align: "center", className: "select-column",
+    {
+      key: "selected", width: 34, align: "center", className: "select-column",
       title: <Checkbox aria-label={t("全选当前页")} checked={rows.length > 0 && chosen.length === rows.length}
         indeterminate={chosen.length > 0 && chosen.length < rows.length} disabled={working || !rows.length}
         onChange={(event) => setSelection(new Set(event.target.checked ? rows.map(({ id }) => id) : []))} />,
       onCell: () => ({ onClick: (event) => event.stopPropagation() }),
       render: (_, row) => <Checkbox aria-label={t("选择 {name}", { name: nameLabel(row.title, t) })}
         checked={selection.has(row.id)} disabled={working} onChange={() => toggleRow(row.id)} />,
-    }] : []),
+    },
     {
-      title: section === "cookies" ? t("名称 / 值") : section === "cache" ? t("请求 URL") : t("键"),
+      key: "rowIndex", width: 42, align: "center", className: "index-column",
+      title: "#",
+      render: (_, __, rowIndex) => <span className="row-index-num">{index * pageSize + rowIndex + 1}</span>,
+    },
+    {
+      title: section === "cookies" ? t("名称") : section === "cache" ? t("请求 URL") : t("键"),
       key: "title", width: keyColumnWidth,
-      render: (_, row) => <Button type="text" size="small" className="record-open" data-record={row.id}
-        aria-label={t("查看 {name}", { name: nameLabel(row.title, t) })}
-        onClick={(event) => { event.stopPropagation(); openRow(row); }}>
-        <span className="cell-lines">
-          <span className="cell-text" title={row.title}>{matchText(row.title, nameLabel(row.title, t))}</span>
-          {section === "cookies" && <Typography.Text className="cell-text" type="secondary" title={row.cookie.value}>
-            {matchText(row.cookie.value, t("（空值）"))}
-          </Typography.Text>}
-        </span>
-      </Button>,
+      render: (_, row) => <span className="cell-text" title={row.title}>
+        {matchText(row.title, nameLabel(row.title, t))}
+      </span>,
+    },
+    {
+      title: section === "cache" ? t("方法") : t("值"),
+      key: "value", width: section === "cache" ? 56 : undefined,
+      render: (_, row) => {
+        const displayValue = section === "cookies" ? row.cookie.value : (row.value ?? row.preview);
+        return <span className="cell-text" title={displayValue}>{matchText(displayValue, t("（空值）"))}</span>;
+      },
     },
     ...(section === "cookies" && width >= 600 ? [
-      { title: t("到期时间"), key: "expires", width: width >= 960 && !split ? 140 : 108,
+      { title: t("域名"), key: "domain", width: width >= 960 && !split ? 170 : 136,
+        render: (_, { cookie }) => {
+          const hostPath = `${cookie.domain}${cookie.path}`;
+          return <span className="cell-text" title={hostPath}>{matchText(hostPath)}</span>;
+        } },
+      { title: t("到期时间"), key: "expires", width: width >= 960 && !split ? 130 : 102,
         render: (_, { cookie }) => <span className="cell-text">{cookie.session ? t("会话 Cookie")
           : new Date(cookie.expirationDate * 1000).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US")}</span> },
-      ...(width >= 960 && !split ? [{ title: t("属性"), key: "flags", width: 156, render: (_, { cookie }) =>
+      ...(width >= 960 && !split ? [{ title: t("属性"), key: "flags", width: 148, render: (_, { cookie }) =>
         <span className="cell-text">{[cookie.secure && "Secure", cookie.httpOnly && "HttpOnly", cookie.sameSite].filter(Boolean).join(" · ")}</span> }] : []),
     ] : []),
     {
-      title: section === "cookies" ? t("域名 / 路径") : section === "cache" ? t("方法") : t("值"),
-      key: "value", width: section === "cache" ? 56 : undefined,
-      render: (_, row) => section === "cookies" ? <span className="cell-lines">
-        <span className="cell-text" title={row.cookie.domain}>{matchText(row.cookie.domain)}</span>
-        <Typography.Text type="secondary" className="cell-text" title={row.cookie.path}>{matchText(row.cookie.path)}</Typography.Text>
-      </span> : <span className="cell-text" title={row.value ?? row.preview}>{matchText(row.value ?? row.preview, t("（空值）"))}</span>,
-    },
-    {
-      key: "actions", width: hasInlineValue ? 86 : 62, align: "right", className: "row-actions-col",
+      key: "actions", width: hasInlineValue ? 84 : 60, align: "right", className: "row-actions-col",
       onCell: () => ({ onClick: (event) => event.stopPropagation() }),
       render: (_, row) => {
         const inlineValue = row.cookie?.value ?? row.value;
         return <div className="row-actions" role="group" aria-label={t("记录操作")}>
-          <IconAction icon={hasInlineValue ? <KeyOutlined /> : <CopyOutlined />} label={t(copyKeyLabel)}
+          <IconAction icon={hasInlineValue ? <IconKey /> : <IconCopy />} label={t(copyKeyLabel)}
             disabled={!canRowAct} onClick={() => void copy(row.title)} />
-          {hasInlineValue && <IconAction icon={<CopyOutlined />} label={t("复制值")}
+          {hasInlineValue && <IconAction icon={<IconCopy />} label={t("复制值")}
             disabled={!canRowAct || typeof inlineValue !== "string"} onClick={() => void copy(inlineValue)} />}
-          <IconAction danger icon={<DeleteOutlined />} label={t("删除")} aria-haspopup="dialog"
+          <IconAction danger icon={<IconDelete />} label={t("删除")} aria-haspopup="dialog"
             disabled={!canRowAct} onClick={() => deleteRows([row])} />
         </div>;
       },
@@ -440,43 +433,43 @@ export default function Records({ target, section, revision, automatic, density,
       <div className="workspace-toolbar" inert={!!editor}>
         <div className="find-row">
           {section === "idb" && <div className="toolbar-scopes">
-            <ScopeSelect label={t("数据库")} icon={<DatabaseOutlined />} value={selectedDb} names={databases.map((item) => ({
+            <ScopeSelect label={t("数据库")} icon={<IconDatabase />} value={selectedDb} names={databases.map((item) => ({
               ...item, label: `${nameLabel(item.name, t)} · v${item.version}${item.pending ? ` · ${t("等待完成")}` : ""}`,
             }))} onChange={(name) => { setDbName(name); setStoreName(null); resetView(); }} />
-            <ScopeSelect label={t("对象仓库")} icon={<TableOutlined />} value={scope.storeName} names={dbPending ? [] : stores.value ?? []}
+            <ScopeSelect label={t("对象仓库")} icon={<IconTable />} value={scope.storeName} names={dbPending ? [] : stores.value ?? []}
               onChange={(name) => { setStoreName(name); resetView(); }} />
           </div>}
           {section === "cache" && <div className="toolbar-scopes toolbar-scopes-single">
-            <ScopeSelect label="Cache" icon={<HddOutlined />} value={selectedCache} names={caches.map((name) => ({ name }))}
+            <ScopeSelect label="Cache" icon={<IconCache />} value={selectedCache} names={caches.map((name) => ({ name }))}
               onChange={(name) => { setCacheName(name); resetView(); }} />
           </div>}
-          <Input ref={search} size="small" className="search" prefix={<SearchOutlined />} allowClear
+          <Input ref={search} size="small" className="search" prefix={<IconSearch />} allowClear
             aria-label={section === "cookies" ? t("搜索 Cookie 名称、值、域名或路径") : t("搜索记录")}
             placeholder={section === "cookies" ? t("搜索 Cookie") : section === "cache" ? t("搜索 URL") : t("搜索键或值")}
             value={query} onChange={(event) => { setQuery(event.target.value); resetView(); }} />
           <div className="action-strip" role="group" aria-label={t("当前存储区操作")}>
             {canCreate && <div className="action-group">
-              <IconAction icon={<PlusOutlined />} label={t(section === "cookies" ? "新增 Cookie" : "新增记录")}
+              <IconAction icon={<IconPlus />} label={t(section === "cookies" ? "新增 Cookie" : "新增记录")}
                 aria-haspopup="dialog" onClick={() => edit()} disabled={working || !!listError} />
             </div>}
             {section === "cookies" && <div className="action-group">
-              <IconAction icon={<UploadOutlined />} label={t("导入 Cookie 备份")} aria-haspopup="dialog"
+              <IconAction icon={<IconImport />} label={t("导入 Cookie")} aria-haspopup="dialog"
                 disabled={working} onClick={() => openTransfer("import", search)} />
-              <IconAction icon={<DownloadOutlined />} label={t("导出 Cookie")} aria-haspopup="dialog"
+              <IconAction icon={<IconExport />} label={t("导出 Cookie")} aria-haspopup="dialog"
                 disabled={working} onClick={() => openTransfer("export", search, chosen.map(({ id }) => id))} />
             </div>}
             {webStorage && <div className="action-group">
-              <IconAction icon={<DiffOutlined />} label={t("存储变化对比")} onClick={() => setWebMode("diff")} disabled={working} />
-              <IconAction icon={<UploadOutlined />} label={t("导入 Web Storage")} onClick={() => setWebMode("import")} disabled={working} />
-              <IconAction icon={<DownloadOutlined />} label={t("导出 Web Storage")} onClick={() => setWebMode("export")} disabled={working} />
-              {undo && <IconAction icon={<UndoOutlined />} label={t("撤销删除")} onClick={() => setWebMode("undo")} disabled={working} />}
+              <IconAction icon={<IconDiff />} label={t("存储变化对比")} onClick={() => setWebMode("diff")} disabled={working} />
+              <IconAction icon={<IconImport />} label={t("导入 Web Storage")} onClick={() => setWebMode("import")} disabled={working} />
+              <IconAction icon={<IconExport />} label={t("导出 Web Storage")} onClick={() => setWebMode("export")} disabled={working} />
+              {undo && <IconAction icon={<IconUndo />} label={t("撤销删除")} onClick={() => setWebMode("undo")} disabled={working} />}
             </div>}
             <div className="action-group">
-              {section === "idb" && <IconAction danger icon={<DatabaseOutlined />} label={t("删除数据库")} aria-haspopup="dialog"
-                disabled={working || selectedDb === null || dbPending || catalogLoading} onClick={() => clearScope(true)} />}
-              <IconAction danger icon={<DeleteOutlined />} label={section === "cache" ? t("删除此 Cache") : t("清空此存储区")}
-                aria-haspopup="dialog" disabled={working || busy || missingScope || !canClear || !!catalogError}
-                onClick={() => clearScope()} />
+              {section === "idb" && <IconAction danger icon={<IconDatabase />} label={t("删除数据库")} aria-haspopup="dialog"
+                disabled={working || selectedDb === null || dbPending || catalogLoading} onClick={deleteDatabase} />}
+              <IconAction danger icon={<IconDelete />} label={t("删除所选")} aria-haspopup="dialog"
+                disabled={working || busy || chosen.length === 0}
+                onClick={() => deleteRows(chosen, true)} />
             </div>
           </div>
         </div>
@@ -497,6 +490,8 @@ export default function Records({ target, section, revision, automatic, density,
             size={density === "compact" ? "small" : "middle"} columns={columns}
             onRow={(row) => ({
               onClick: () => openRow(row),
+              tabIndex: -1,
+              "data-record": row.id,
               "data-selected": selection.has(row.id) || undefined,
               "data-active": detailRow?.id === row.id || undefined,
             })} />}
@@ -506,15 +501,14 @@ export default function Records({ target, section, revision, automatic, density,
           : busy || records.refreshing ? t("正在读取…") : listError ? t("读取失败")
           : section === "idb" ? (typeof count.value === "number" ? t("仓库共 {count} 条", { count: count.value }) : t("{count} 条记录", { count: rows.length }))
           : t(section === "cookies" ? "{count} 个 Cookie" : "{count} 条记录", { count: filtered.length })}</Typography.Text>
-        {chosen.length > 0 && <div className="action-strip">
-          <Button size="small" type="text" disabled={working} onClick={resetSelection}>{t("取消选择")}</Button>
-          <Button size="small" danger aria-haspopup="dialog" disabled={working || busy}
-            onClick={() => deleteRows(chosen, true)}>{t("删除所选")}</Button>
-        </div>}
         {showPager && <div className="page-controls" role="navigation" aria-label={t("分页")}>
-          <IconAction icon={<LeftOutlined />} label={t("上一页")} disabled={busy || index === 0} onClick={() => movePage(index - 1)} />
+          <Select size="small" className="page-size-select" aria-label={t("每页条数")}
+            popupMatchSelectWidth={false} disabled={busy} value={pageSize}
+            options={PAGE_SIZES.map((size) => ({ value: size, label: t("{count}/页", { count: size }) }))}
+            onChange={changePageSize} />
+          <IconAction icon={<IconPrev />} label={t("上一页")} disabled={busy || index === 0} onClick={() => movePage(index - 1)} />
           <Typography.Text type="secondary" className="page-indicator">{pageIndicator}</Typography.Text>
-          <IconAction icon={<RightOutlined />} label={t("下一页")} disabled={busy || !hasNext} onClick={() => movePage(index + 1)} />
+          <IconAction icon={<IconNext />} label={t("下一页")} disabled={busy || !hasNext} onClick={() => movePage(index + 1)} />
         </div>}
       </footer>
       </div>

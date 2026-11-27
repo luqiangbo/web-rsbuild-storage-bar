@@ -8,16 +8,11 @@ const colorQuery = "(prefers-color-scheme: dark)";
 const defaults = { section: "cookies", density: "compact", automatic: true, theme: "system", language: "system", font: "auto" };
 const validSections = ["cookies", "local", "session", "idb", "cache"];
 
-function normalizeSection(section) {
-  if (section === "storage") return "local";
-  return validSections.includes(section) ? section : defaults.section;
-}
-
 function readPreferences() {
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) || "{}");
     return {
-      section: normalizeSection(saved.section),
+      section: validSections.includes(saved.section) ? saved.section : defaults.section,
       density: saved.density === "comfortable" ? saved.density : defaults.density,
       automatic: typeof saved.automatic === "boolean" ? saved.automatic : defaults.automatic,
       theme: ["light", "dark"].includes(saved.theme) ? saved.theme : defaults.theme,

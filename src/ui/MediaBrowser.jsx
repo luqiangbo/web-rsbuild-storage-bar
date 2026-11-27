@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  AppstoreOutlined, ArrowLeftOutlined, AudioOutlined, CloseOutlined, CopyOutlined, DownloadOutlined,
-  FileOutlined, FileTextOutlined, FolderOutlined, LeftOutlined, PictureOutlined, PlayCircleOutlined,
-  RightOutlined, SearchOutlined, UnorderedListOutlined, VideoCameraOutlined, ZoomInOutlined, ZoomOutOutlined,
-} from "@ant-design/icons";
 import { Alert, Breadcrumb, Button, Input, Progress, Segmented, Spin, Table, Tag, Tooltip, Typography } from "antd";
 import { runInPage } from "../api/page.js";
 import IconAction from "./IconAction.jsx";
+import {
+  IconArrowLeft, IconAudio, IconClose, IconCopy, IconDownload, IconFile, IconFileText, IconFolder,
+  IconGrid, IconImage, IconList, IconNext, IconPlay, IconPrev, IconSearch, IconVideo, IconZoomIn, IconZoomOut,
+} from "./Icons.jsx";
 import JsonViewer from "./JsonViewer.jsx";
 import { jsonError } from "./jsonDocument.js";
 import { usePreferences } from "./preferences.js";
@@ -30,7 +29,7 @@ const sizeText = (bytes, t) => {
 };
 const mediaLabels = { audio: "音频", image: "图片", video: "视频", text: "文本" };
 const mediaTagColors = { audio: "purple", image: "cyan", video: "blue", text: "green" };
-const mediaIcons = { audio: AudioOutlined, image: PictureOutlined, video: VideoCameraOutlined, text: FileTextOutlined };
+const mediaIcons = { audio: IconAudio, image: IconImage, video: IconVideo, text: IconFileText };
 const mediaType = (mime) => {
   const lower = mime?.split(";")[0].trim().toLowerCase() ?? "";
   if (lower.startsWith("video/")) return "video";
@@ -269,7 +268,7 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
   }
 
   const category = mediaType(state.type || source.type);
-  const Icon = mediaIcons[category] ?? FileOutlined;
+  const Icon = mediaIcons[category] ?? IconFile;
   const label = source.name || t(mediaLabels[category] ?? "本地媒体");
   const decodeError = () => setState((current) => current.status === "ready" && current.url === state.url
     ? { ...current, playbackError: "Chrome 无法解码此文件，或文件不完整。" } : current);
@@ -313,26 +312,26 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
           src={state.url} alt={label} draggable={false} onError={decodeError}
           style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }} />
           : category === "audio" ? <div className="media-audio-stage">
-            <AudioOutlined className="media-audio-glyph" aria-hidden="true" />
+            <IconAudio size={34} className="media-audio-glyph" aria-hidden="true" />
             <Player src={state.url} controls preload="metadata" aria-label={label} onError={decodeError} />
           </div>
             : <Player src={state.url} controls playsInline preload="metadata" aria-label={label} onError={decodeError} />}
         {switching && <span className="media-stage-busy" aria-label={t("正在读取…")}><Spin size="small" /></span>}
       </> : rawOnly ? <div className="media-stage-placeholder">
-        <Icon className="media-stage-icon" />
+        <Icon size={30} className="media-stage-icon" />
         {state.error && <Alert type="error" showIcon title={t(state.error)} />}
         <Typography.Text type="secondary">{t("此格式暂不支持在线预览，可下载到本地查看。")}</Typography.Text>
-        <Button type="primary" size="small" icon={<DownloadOutlined />} onClick={download}>{t("下载文件")}</Button>
+        <Button type="primary" size="small" icon={<IconDownload />} onClick={download}>{t("下载文件")}</Button>
       </div> : <div className="media-stage-placeholder">
-        <Icon className="media-stage-icon" />
+        <Icon size={30} className="media-stage-icon" />
         {state.error && <Alert type="error" showIcon title={t(state.error)} />}
         {sourceCategory === "text" && source.size > textPreviewLimit && !state.error &&
           <Typography.Text type="secondary">{t("文本文件超过 2 MiB，可手动加载预览或直接下载。")}</Typography.Text>}
         <div className="detail-actions">
-          <Button type="primary" size="small" icon={<PlayCircleOutlined />} onClick={() => void play()}>
+          <Button type="primary" size="small" icon={<IconPlay />} onClick={() => void play()}>
             {state.error ? t("重新读取文件") : t("加载预览")}
           </Button>
-          {source.kind === "opfs" && <Button size="small" icon={<DownloadOutlined />} onClick={download}>{t("下载文件")}</Button>}
+          {source.kind === "opfs" && <Button size="small" icon={<IconDownload />} onClick={download}>{t("下载文件")}</Button>}
         </div>
       </div>}
     </div>
@@ -350,23 +349,23 @@ export function MediaPreview({ target, source, autoRead = false, onClose, onPrev
       </div>
       <div className="action-strip media-preview-actions">
         {isImageReady && <div className="action-group">
-          <IconAction icon={<ZoomOutOutlined />} label={t("缩小")} disabled={zoom <= minZoom} onClick={() => stepZoom(-0.25)} />
+          <IconAction icon={<IconZoomOut />} label={t("缩小")} disabled={zoom <= minZoom} onClick={() => stepZoom(-0.25)} />
           <Tooltip title={t("重置缩放")}>
             <Button type="text" size="small" className="media-zoom-reset" onClick={resetZoom}>
               {Math.round(zoom * 100)}%
             </Button>
           </Tooltip>
-          <IconAction icon={<ZoomInOutlined />} label={t("放大")} disabled={zoom >= maxZoom} onClick={() => stepZoom(0.25)} />
+          <IconAction icon={<IconZoomIn />} label={t("放大")} disabled={zoom >= maxZoom} onClick={() => stepZoom(0.25)} />
         </div>}
         {(onPrev || onNext) && <div className="action-group">
-          <IconAction icon={<LeftOutlined />} label={t("上一项")} disabled={!onPrev} onClick={onPrev} />
+          <IconAction icon={<IconPrev />} label={t("上一项")} disabled={!onPrev} onClick={onPrev} />
           {positionText && <Typography.Text type="secondary" className="media-position-text">{positionText}</Typography.Text>}
-          <IconAction icon={<RightOutlined />} label={t("下一项")} disabled={!onNext} onClick={onNext} />
+          <IconAction icon={<IconNext />} label={t("下一项")} disabled={!onNext} onClick={onNext} />
         </div>}
         {(state.status === "ready" || (rawOnly && !unavailable && state.status !== "loading")) && <div className="action-group">
-          {isTextReady && <IconAction icon={<CopyOutlined />} label={t("复制值")} onClick={() => void copyText()} />}
-          <IconAction icon={<DownloadOutlined />} label={t("下载文件")} onClick={download} />
-          {embedded && state.status === "ready" && <IconAction icon={<CloseOutlined />} label={t("关闭预览")}
+          {isTextReady && <IconAction icon={<IconCopy />} label={t("复制值")} onClick={() => void copyText()} />}
+          <IconAction icon={<IconDownload />} label={t("下载文件")} onClick={download} />
+          {embedded && state.status === "ready" && <IconAction icon={<IconClose />} label={t("关闭预览")}
             onClick={() => {
               abortCurrent();
               revokeIfOwned(state.url);
@@ -595,7 +594,7 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
       title: t("名称"), key: "file",
       render: (_, row) => {
         const category = mediaType(row.type);
-        const Icon = row.directory ? FolderOutlined : mediaIcons[category] ?? FileOutlined;
+        const Icon = row.directory ? IconFolder : mediaIcons[category] ?? IconFile;
         const name = row.name || t("（空名称）");
         const openable = canOpen(row, kind);
         const sub = [row.directory ? t("文件夹") : fileHint(row, category),
@@ -641,7 +640,7 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
     <Button type="text" size="small" className="record-title-copy"
       aria-label={t("复制标题 {name}", { name: selectedName })} onClick={() => void copyName(selected.name || "")}>
       <span className="cell-text">{selectedName}</span>
-      <CopyOutlined className="record-title-copy-icon" aria-hidden="true" />
+      <IconCopy className="record-title-copy-icon" aria-hidden="true" />
     </Button>
   </Tooltip>;
 
@@ -664,22 +663,22 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
           {!showTree && <Segmented className="media-source-switch" block size="small" options={sources}
             aria-label={t("媒体来源")} value={kind} onChange={(value) => navigate(value, [])} />}
           <div className="media-browser-path">
-            {path.length > 0 && <IconAction icon={<ArrowLeftOutlined />} label={t("上一级")}
+            {path.length > 0 && <IconAction icon={<IconArrowLeft />} label={t("上一级")}
               disabled={loading} onClick={() => navigate(kind, path.slice(0, -1))} />}
             <Breadcrumb aria-label={t("路径")} items={crumbs} />
             <span className="media-browser-progress" role={loading ? "status" : undefined}
               aria-label={loading ? t("正在读取…") : undefined}>{loading && <Spin size="small" />}</span>
           </div>
           {showFilterBar && <div className="media-toolbar">
-            <Input size="small" className="search" prefix={<SearchOutlined />} allowClear
+            <Input size="small" className="search" prefix={<IconSearch />} allowClear
               aria-label={t("筛选文件名")} placeholder={t("筛选文件名")}
               value={search} onChange={(event) => setSearch(event.target.value)} />
             {typeOptions.length > 2 && <Segmented size="small" className="media-type-filter"
               aria-label={t("媒体类型")} value={activeTypeFilter} options={typeOptions} onChange={setTypeFilter} />}
             <div className="workspace-switch media-view-switch" role="group" aria-label={t("视图模式")}>
-              <IconAction icon={<AppstoreOutlined />} label={t("卡片视图")} aria-pressed={viewMode === "grid"}
+              <IconAction icon={<IconGrid />} label={t("卡片视图")} aria-pressed={viewMode === "grid"}
                 onClick={() => setViewMode("grid")} />
-              <IconAction icon={<UnorderedListOutlined />} label={t("列表视图")} aria-pressed={viewMode === "list"}
+              <IconAction icon={<IconList />} label={t("列表视图")} aria-pressed={viewMode === "list"}
                 onClick={() => setViewMode("list")} />
             </div>
           </div>}
@@ -699,16 +698,16 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
                 const name = row.name || t("（空名称）");
                 return <button key={rowKey(row)} type="button" className="media-folder-card" disabled={loading}
                   aria-label={t("打开文件夹 {name}", { name })} onClick={() => selectRow(row)}>
-                  <FolderOutlined className="media-folder-glyph" aria-hidden="true" />
+                  <IconFolder className="media-folder-glyph" aria-hidden="true" />
                   <span className="cell-text data-input" title={name}>{name}</span>
-                  <RightOutlined className="media-folder-arrow" aria-hidden="true" />
+                  <IconNext size={12} className="media-folder-arrow" aria-hidden="true" />
                 </button>;
               })}
             </div>}
             {files.length > 0 && <div className="media-card-grid">
               {files.map((row) => {
                 const category = mediaType(row.type);
-                const Icon = mediaIcons[category] ?? FileOutlined;
+                const Icon = mediaIcons[category] ?? IconFile;
                 const name = row.name || t("（空名称）");
                 const openable = canOpen(row, kind);
                 const previewable = canPreview(row);
@@ -723,7 +722,7 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
                       ? <MediaThumbnail key={JSON.stringify([listing.key, rowKey(row), row.modified, row.size])}
                         className="media-card-thumb-inner" target={target} source={sourcesByRow.get(rowKey(row))}
                         enqueue={enqueueThumbnail} paused={loading} />
-                      : <span className="media-card-thumb-inner" aria-hidden="true"><Icon /></span>}
+                      : <span className="media-card-thumb-inner" aria-hidden="true"><Icon size={22} /></span>}
                     {mediaLabels[category] && <span className="media-card-badge" data-kind={category}>{t(mediaLabels[category])}</span>}
                   </div>
                   <div className="media-card-body">
@@ -751,9 +750,9 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
                 : t("共 {count} 项", { count: allRows.length })}
           </Typography.Text>
           {(activePage.index > 0 || listing.value?.next != null) && <div className="page-controls">
-            <IconAction icon={<LeftOutlined />} label={t("上一页")} disabled={loading || activePage.index === 0}
+            <IconAction icon={<IconPrev />} label={t("上一页")} disabled={loading || activePage.index === 0}
               onClick={() => move(activePage.index - 1)} />
-            <IconAction icon={<RightOutlined />} label={t("下一页")} disabled={loading || listing.value?.next == null}
+            <IconAction icon={<IconNext />} label={t("下一页")} disabled={loading || listing.value?.next == null}
               onClick={() => move(activePage.index + 1)} />
           </div>}
         </footer>
@@ -761,7 +760,7 @@ export default function MediaBrowser({ target, refreshVersion, initialLocation, 
       {splitPreview && selectedSource && <aside className="record-inspector media-inspector" aria-label={t("预览媒体")}>
         <header className="inspector-header">
           <div className="inspector-heading">{previewTitle}</div>
-          <IconAction icon={<CloseOutlined />} label={t("关闭预览")} onClick={() => setSelectedId(null)} />
+          <IconAction icon={<IconClose />} label={t("关闭预览")} onClick={() => setSelectedId(null)} />
         </header>
         <div className="media-inspector-body">{previewElement}</div>
       </aside>}

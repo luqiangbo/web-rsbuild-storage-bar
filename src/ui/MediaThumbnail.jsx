@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { PictureOutlined, VideoCameraOutlined } from "@ant-design/icons";
+import { IconImage, IconVideo } from "./Icons.jsx";
 import { runInPage } from "../api/page.js";
 import { autoPreviewLimit, readMediaBlob } from "./mediaTransfer.js";
 
@@ -64,7 +64,7 @@ export default function MediaThumbnail({ target, source, enqueue, paused, classN
   const [thumbnail, setThumbnail] = useState(null);
   const element = useRef(null);
   const video = source.type.toLowerCase().startsWith("video/");
-  const Icon = video ? VideoCameraOutlined : PictureOutlined;
+  const Icon = video ? IconVideo : IconImage;
   useEffect(() => {
     if (paused || thumbnail !== null) return;
     const controller = new AbortController();
